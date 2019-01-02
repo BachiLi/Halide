@@ -57,7 +57,7 @@ struct Derivative {
             if (it != adjoints.end()) {
                 result.push_back(it->second);
             }
-    }
+        }
         return result;
     }
 };

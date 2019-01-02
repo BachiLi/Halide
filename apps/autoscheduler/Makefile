@@ -34,6 +34,13 @@ $(BIN)/test: test.cpp $(AUTOSCHED_BIN)/libauto_schedule.so
 test: $(BIN)/test
 	HL_WEIGHTS_DIR=weights LD_LIBRARY_PATH=$(BIN) $(BIN)/test
 
+# 
+$(BIN)/benchmark_gradient: benchmark_gradient.cpp Derivative.cpp DerivativeUtils.cpp $(AUTOSCHED_BIN)/libauto_schedule.so
+	$(CXX) $(CXXFLAGS) $(USE_EXPORT_DYNAMIC) $^ -o $@ $(LDFLAGS) $(LIB_HALIDE) $(HALIDE_SYSTEM_LIBS)
+
+benchmark_gradient: $(BIN)/benchmark_gradient
+	HL_WEIGHTS_DIR=weights LD_LIBRARY_PATH=$(BIN) $(BIN)/benchmark_gradient
+
 clean:
 	rm -rf $(BIN)
 
