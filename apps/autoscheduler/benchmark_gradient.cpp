@@ -26,12 +26,34 @@ int main(int argc, char **argv) {
     MachineParams params(32, 16000000, 40);
     // Use a fixed target for the analysis to get consistent results from this test.
     Target target("x86-64-linux-sse41-avx-avx2");
-    int timing_iterations = 20;
+    int timing_iterations = 10;
 
     Var x("x"), y("y");
 
     if (1) {
-        std::cout << "1D box filter" << std::endl;
+        // For time calibration
+        std::cout << "1D box filter without gradient" << std::endl;
+        int n = 1000000;
+        Func f("f"), g("g"), h("h");
+        RDom r(0, 5);
+        f(x) = cast<float>(x);
+        g(x) += f(x - r);
+
+        g.estimate(x, 0, n);
+
+        Pipeline p = Pipeline({g});
+        p.auto_schedule(target, params);
+        Buffer<float> g_buffer(n);
+        p.compile_jit(target);
+        double best_time = benchmark(timing_iterations, 10, [&]() {
+            p.realize(g_buffer);
+        });
+        std::cout << "best time:" << best_time << std::endl;
+    }
+
+
+    if (1) {
+        std::cout << "1D box filter with gradient" << std::endl;
         int n = 1000000;
         Func f("f"), g("g"), h("h");
         RDom r(0, 5);
@@ -56,7 +78,7 @@ int main(int argc, char **argv) {
     }
 
     if (1) {
-        std::cout << "1D conv" << std::endl;
+        std::cout << "1D conv with gradient" << std::endl;
         int n = 1000000;
         Func f("f"), g("g"), h("h"), k("k");
         RDom r(0, 5);
