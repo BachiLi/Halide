@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
     MachineParams params(32, 16000000, 40);
     // Use a fixed target for the analysis to get consistent results from this test.
     Target target("x86-64-linux-sse41-avx-avx2");
-    int timing_iterations = 10;
+    int timing_iterations = 40;
 
     Var x("x"), y("y");
 
@@ -165,14 +165,15 @@ int main(int argc, char **argv) {
         }
 
         // Algorithm
-        int n = 1000000;
+        int n = 1048576;
+        int w = 9;
         Buffer<float> in(n);
         for (int i = 0; i < n; i++) {
             in(i) = (float) i / (float) n;
         }
         Func in_clamped = BoundaryConditions::repeat_edge(in);
         Func f("f"), loss("loss");
-        RDom r(0, 5);
+        RDom r(0, w);
         f(x) += in_clamped(x - r);
         RDom r_f(0, n);
         loss() += f(r_f);
@@ -210,17 +211,18 @@ int main(int argc, char **argv) {
         } else {
             std::cout << "1D conv with gradient" << std::endl;
         }
-        int n = 1000000;
-        Buffer<float> in(n), k(5);
+        int n = 1048576;
+        int w = 9;
+        Buffer<float> in(n), k(w);
         for (int i = 0; i < n; i++) {
             in(i) = (float) i / (float) n;
         }
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < w; i++) {
             k(i) = (float) i / (float) n;
         }
         Func in_clamped = BoundaryConditions::repeat_edge(in);
         Func k_inter("k"), f("f"), loss("loss");
-        RDom r(0, 5);
+        RDom r(0, w);
         k_inter(x, y) = k(x);
         f(x) += in_clamped(x - r) * k_inter(r, x);
         RDom r_f(0, n);
@@ -232,8 +234,8 @@ int main(int argc, char **argv) {
 
         f.estimate(x, 0, n);
         d_in.estimate(d_in.args()[0], 0, n);
-        d_k_inter.estimate(x, 0, n);
-        d_k_inter.estimate(y, 0, 5);
+        d_k_inter.estimate(x, 0, w);
+        d_k_inter.estimate(y, 0, n);
 
         if (stage == 0) {
             Pipeline p = Pipeline({f});
@@ -246,35 +248,37 @@ int main(int argc, char **argv) {
             std::cout << "forward best time:" << best_time_fwd << std::endl;
         } else {
             Pipeline p_grad = Pipeline({d_in, d_k_inter});
-            std::cerr << "p_grad" << std::endl;
             p_grad.auto_schedule(target, params);
-            std::cerr << "after auto schedule" << std::endl;
-            Buffer<float> d_f_buffer(n), d_k_inter_buffer(n, 5), d_k_buffer(5);
+            Buffer<float> d_f_buffer(n), d_k_inter_buffer(w, n), d_k_buffer(w);
             // Manually scheduled reduction from k_inter to k
             Func d_k("d_k");
             d_k(x) += d_k_inter_buffer(x, r_f);
             RVar rxo, rxi, ryi;
             int tile_width = 32, tile_height = 32;
             d_k.update(0)
-                .split(r_f, rxo, rxi, tile_width * tile_height)
-                .split(rxi, ryi, rxi, tile_width);
+               .split(r_f, rxo, rxi, tile_width * tile_height, TailStrategy::GuardWithIf)
+               .split(rxi, ryi, rxi, tile_width, TailStrategy::GuardWithIf);
             Var xo, yo, xi;
             // Parallel on tiles and vectorize inside tile
             Func k_reduction = d_k.update(0)
-                .rfactor({{rxo, xo},
-                        {rxi, xi}});
+                                  .rfactor({{rxo, xo},
+                                            {rxi, xi}});
             k_reduction.compute_root()
                 .parallel(xo)
                 .vectorize(xi);
             k_reduction.update()
-                .reorder({ryi, xi, x});
-            d_k.compute_root();
+                       .reorder({ryi, xi, x})
+                       .parallel(xo)
+                       .vectorize(xi);
+            d_k.compute_root()
+               .update();
+            print_func(d_k);
 
             p_grad.compile_jit(target);
             d_k.compile_jit(target);
             double best_time_grad = benchmark(timing_iterations, 10, [&]() {
                 p_grad.realize({d_f_buffer, d_k_inter_buffer});
-                // d_k.realize(d_k_buffer);
+                d_k.realize(d_k_buffer);
             });
             std::cout << "gradient best time:" << best_time_grad << std::endl;
         }
