@@ -157,81 +157,129 @@ int main(int argc, char **argv) {
 
     Var x("x"), y("y");
 
-    if (0) {
-        // For time calibration
-        std::cout << "1D box filter without gradient" << std::endl;
+    for (int stage = 0; stage < 2; stage++) {
+        if (stage == 0) {
+            std::cout << "1D box filter without gradient" << std::endl;
+        } else {
+            std::cout << "1D box filter with gradient" << std::endl;
+        }
+
+        // Algorithm
         int n = 1000000;
-        Func f("f"), g("g"), h("h");
+        Buffer<float> in(n);
+        for (int i = 0; i < n; i++) {
+            in(i) = (float) i / (float) n;
+        }
+        Func in_clamped = BoundaryConditions::repeat_edge(in);
+        Func f("f"), loss("loss");
         RDom r(0, 5);
-        f(x) = cast<float>(x);
-        g(x) += f(x - r);
+        f(x) += in_clamped(x - r);
+        RDom r_f(0, n);
+        loss() += f(r_f);
 
-        g.estimate(x, 0, n);
+        auto d = propagate_adjoints(loss);
+        Func d_in = d(in);
 
-        Pipeline p = Pipeline({g});
-        p.auto_schedule(target, params);
-        Buffer<float> g_buffer(n);
-        p.compile_jit(target);
-        double best_time = benchmark(timing_iterations, 10, [&]() {
-            p.realize(g_buffer);
-        });
-        std::cout << "best time:" << best_time << std::endl;
+        f.estimate(x, 0, n);
+        d_in.estimate(d_in.args()[0], 0, n);
+
+        if (stage == 0) {
+            Pipeline p = Pipeline({f});
+            p.auto_schedule(target, params);
+            Buffer<float> f_buffer(n);
+            p.compile_jit(target);
+            double best_time_fwd = benchmark(timing_iterations, 10, [&]() {
+                p.realize(f_buffer);
+            });
+            std::cout << "forward best time:" << best_time_fwd << std::endl;
+        } else {
+            Pipeline p_grad = Pipeline({d_in});
+            p_grad.auto_schedule(target, params);
+            Buffer<float> d_in_buffer(n);
+            p_grad.compile_jit(target);
+            double best_time_grad = benchmark(timing_iterations, 10, [&]() {
+                p_grad.realize(d_in_buffer);
+            });
+            std::cout << "gradient best time:" << best_time_grad << std::endl;
+        }
     }
 
-
-    if (1) {
-        std::cout << "1D box filter with gradient" << std::endl;
+    for (int stage = 0; stage < 2; stage++) {
+        if (stage == 0) {
+            std::cout << "1D conv without gradient" << std::endl;
+        } else {
+            std::cout << "1D conv with gradient" << std::endl;
+        }
         int n = 1000000;
-        Func f("f"), g("g"), h("h");
+        Buffer<float> in(n), k(5);
+        for (int i = 0; i < n; i++) {
+            in(i) = (float) i / (float) n;
+        }
+        for (int i = 0; i < 5; i++) {
+            k(i) = (float) i / (float) n;
+        }
+        Func in_clamped = BoundaryConditions::repeat_edge(in);
+        Func k_inter("k"), f("f"), loss("loss");
         RDom r(0, 5);
-        f(x) = cast<float>(x);
-        g(x) += f(x - r);
+        k_inter(x, y) = k(x);
+        f(x) += in_clamped(x - r) * k_inter(r, x);
         RDom r_f(0, n);
-        h() += g(r_f);
+        loss() += f(r_f);
 
-        auto d = propagate_adjoints(h);
-        Func d_f = d(f);
-        print_func(d_f);
+        auto d = propagate_adjoints(loss);
+        Func d_in = d(in);
+        Func d_k_inter = d(k_inter);
 
-        d_f.estimate(x, 0, n);
+        f.estimate(x, 0, n);
+        d_in.estimate(d_in.args()[0], 0, n);
+        d_k_inter.estimate(x, 0, n);
+        d_k_inter.estimate(y, 0, 5);
 
-        Pipeline p = Pipeline({d_f});
-        p.auto_schedule(target, params);
-        Buffer<float> d_f_buffer(n);
-        p.compile_jit(target);
-        double best_time = benchmark(timing_iterations, 10, [&]() {
-            p.realize(d_f_buffer);
-        });
-        std::cout << "best time:" << best_time << std::endl;
-    }
+        if (stage == 0) {
+            Pipeline p = Pipeline({f});
+            p.auto_schedule(target, params);
+            Buffer<float> f_buffer(n);
+            p.compile_jit(target);
+            double best_time_fwd = benchmark(timing_iterations, 10, [&]() {
+                p.realize(f_buffer);
+            });
+            std::cout << "forward best time:" << best_time_fwd << std::endl;
+        } else {
+            Pipeline p_grad = Pipeline({d_in, d_k_inter});
+            std::cerr << "p_grad" << std::endl;
+            p_grad.auto_schedule(target, params);
+            std::cerr << "after auto schedule" << std::endl;
+            Buffer<float> d_f_buffer(n), d_k_inter_buffer(n, 5), d_k_buffer(5);
+            // Manually scheduled reduction from k_inter to k
+            Func d_k("d_k");
+            d_k(x) += d_k_inter_buffer(x, r_f);
+            RVar rxo, rxi, ryi;
+            int tile_width = 32, tile_height = 32;
+            d_k.update(0)
+                .split(r_f, rxo, rxi, tile_width * tile_height)
+                .split(rxi, ryi, rxi, tile_width);
+            Var xo, yo, xi;
+            // Parallel on tiles and vectorize inside tile
+            Func k_reduction = d_k.update(0)
+                .rfactor({{rxo, xo},
+                        {rxi, xi}});
+            k_reduction.compute_root()
+                .parallel(xo)
+                .vectorize(xi);
+            k_reduction.update()
+                .reorder({ryi, xi, x});
+            d_k.compute_root();
 
-    if (0) {
-        std::cout << "1D conv with gradient" << std::endl;
-        int n = 1000000;
-        Func f("f"), g("g"), h("h"), k("k");
-        RDom r(0, 5);
-        f(x) = cast<float>(x);
-        k(x) = cast<float>(x);
-        g(x) += f(x - r) * k(r);
-        RDom r_f(0, n);
-        h() += g(r_f);
-
-        auto d = propagate_adjoints(h);
-        Func d_f = d(f);
-        Func d_k = d(k);
-
-        d_f.estimate(x, 0, n);
-        d_k.estimate(x, 0, 5);
-
-        Pipeline p = Pipeline({d_f, d_k});
-        p.auto_schedule(target, params);
-        Buffer<float> d_f_buffer(n), d_k_buffer(5);
-        p.compile_jit(target);
-        double best_time = benchmark(timing_iterations, 10, [&]() {
-            p.realize({d_f_buffer, d_k_buffer});
-        });
-        std::cout << "best time:" << best_time << std::endl;
+            p_grad.compile_jit(target);
+            d_k.compile_jit(target);
+            double best_time_grad = benchmark(timing_iterations, 10, [&]() {
+                p_grad.realize({d_f_buffer, d_k_inter_buffer});
+                // d_k.realize(d_k_buffer);
+            });
+            std::cout << "gradient best time:" << best_time_grad << std::endl;
+        }
     }
 
     return 0;
 }
+
