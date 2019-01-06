@@ -314,6 +314,14 @@ struct LoopNest {
         }
     }
 
+    void set_working_set_at_task_feature(int64_t working_set,
+                                         StageMap<ScheduleFeatures> *features) const {
+        for (const auto &c : children) {
+            c->set_working_set_at_task_feature(working_set, features);
+            features->get(c->stage).working_set_at_task = working_set;
+        }
+    }
+
     void compute_features(const FunctionDAG &dag,
                           const MachineParams &params,
                           const StageMap<Sites> &sites,
@@ -322,7 +330,6 @@ struct LoopNest {
                           const LoopNest *parent,
                           const LoopNest &root,
                           int64_t *working_set,
-                          std::set<pair<const FunctionDAG::Node *, const LoopNest *>> *cross_core_transfers,
                           StageMap<ScheduleFeatures> *features) const {
 
         int64_t working_set_here = 0;
@@ -409,8 +416,26 @@ struct LoopNest {
         }
 
         if (is_root()) {
+            // TODO: This block of code is repeated below. Refactor
             for (const auto &c : children) {
-                c->compute_features(dag, params, sites, subinstances, parallelism, this, root, &working_set_here, cross_core_transfers, features);
+                c->compute_features(dag, params, sites, subinstances, parallelism, this, root, &working_set_here, features);
+            }
+
+            for (const auto *node : store_at) {
+                auto &feat = features->get(&(node->stages[0]));
+                working_set_here += feat.bytes_at_production;
+            }
+            for (const auto *node : store_at) {
+                for (const auto &s : node->stages) {
+                    auto &feat = features->get(&s);
+                    feat.working_set_at_realization = working_set_here;
+                }
+            }
+            for (const auto &c : children) {
+                if (c->node != node) {
+                    auto &feat = features->get(c->stage);
+                    feat.working_set_at_production = working_set_here;
+                }
             }
 
             // Figure out the root-level features for every Func
@@ -425,6 +450,8 @@ struct LoopNest {
                     const auto &p = root_bounds->region_computed(i);
                     feat.bytes_at_root *= (p.second - p.first) + 1;
                 }
+
+                feat.working_set_at_root = working_set_here;
 
                 // What innermost storage extent means for inlined
                 // Funcs is unclear, because we haven't selected which
@@ -547,11 +574,27 @@ struct LoopNest {
 
         // Recurse inwards
         for (const auto &c : children) {
-            c->compute_features(dag, params, sites, subinstances, subparallelism, this, root, &working_set_here, cross_core_transfers, features);
+            c->compute_features(dag, params, sites, subinstances, subparallelism, this, root, &working_set_here, features);
+        }
+        for (const auto *node : store_at) {
+            auto &feat = features->get(&(node->stages[0]));
+            working_set_here += feat.bytes_at_production;
+        }
+        for (const auto *node : store_at) {
+            for (const auto &s : node->stages) {
+                auto &feat = features->get(&s);
+                feat.working_set_at_realization = working_set_here;
+            }
+        }
+        for (const auto &c : children) {
+            if (c->node != node) {
+                auto &feat = features->get(c->stage);
+                feat.working_set_at_production = working_set_here;
+            }
         }
 
-        for (const auto *node : store_at) {
-            working_set_here += features->get(&(node->stages[0])).bytes_at_production;
+        if (at_task) {
+            set_working_set_at_task_feature(working_set_here, features);
         }
 
         if (at_production) {
@@ -769,15 +812,9 @@ struct LoopNest {
                     }
 
                     if (at_production && producer_store_site->is_root()) {
-                        pair<const FunctionDAG::Node *, const LoopNest *> task_pair(e->producer, consumer_task_site);
-                        const bool off_core_load_cost_already_paid = (cross_core_transfers->count(task_pair) > 0);
-                        if (!off_core_load_cost_already_paid) {
-                            off_core_bytes_loaded += task_footprint;
-                            off_core_lines_loaded += task_line_footprint;
-                            cross_core_transfers->insert(task_pair);
-                        }
+                        off_core_bytes_loaded += task_footprint;
+                        off_core_lines_loaded += task_line_footprint;
                     }
-
                 }
             }
         }
@@ -798,7 +835,7 @@ struct LoopNest {
                 // TODO: This overbills scatters, or writes to a restriction region.
                 internal_assert(bytes_loaded >= 0) << "Negative bytes at production: " << feat.bytes_at_production << "\n";
                 feat.unique_bytes_read_per_realization += feat.bytes_at_production;
-                feat.unique_lines_read_per_realization++; // It's accessed contiguously (TODO: This is fishy. Should probably be lines_at_production)
+                feat.unique_lines_read_per_realization += feat.bytes_at_production / feat.innermost_bytes_at_production;
                 feat.allocation_bytes_read_per_realization += feat.bytes_at_production;
             }
         }
@@ -808,6 +845,11 @@ struct LoopNest {
             feat.vector_loads_per_vector = num_dense_loads + 2 * num_stride_2_loads + 3 * num_stride_3_loads + 4 * num_stride_4_loads;
             feat.scalar_loads_per_vector = num_broadcasts + feat.vector_size * num_gathers;
             feat.scalar_loads_per_scalar = num_loads;
+            if (stage->index > 0) {
+                // Assume a self-load
+                feat.vector_loads_per_vector++;
+                feat.scalar_loads_per_scalar++;
+            }
             feat.unique_bytes_read_per_vector = bytes_loaded;
             feat.unique_lines_read_per_vector = lines_loaded;
         }
@@ -1346,7 +1388,6 @@ struct LoopNest {
 
                 bool may_slide = (!in_realization &&
                                   f->stages.size() == 1);
-
                 if (may_slide) {
                     // Store here, but compute further in. Currently
                     // don't have to worry about the constraints this
@@ -1854,8 +1895,7 @@ struct State {
             }
         }
 
-        std::set<pair<const FunctionDAG::Node *, const LoopNest *>> cross_core_transfers;
-        root->compute_features(dag, params, sites, 1, 1, nullptr, *root, nullptr, &cross_core_transfers, features);
+        root->compute_features(dag, params, sites, 1, 1, nullptr, *root, nullptr, features);
 
         for (const auto &n : dag.nodes) {
             if (sites.get(&(n.stages[0])).produce == nullptr) {
