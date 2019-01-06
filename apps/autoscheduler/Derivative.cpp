@@ -1228,8 +1228,7 @@ void ReverseAccumulationVisitor::visit(const Call *op) {
                 Interval r_interval(simplify(rvar.min),
                                     simplify(rvar.min + rvar.extent - 1));
                 if (can_prove(r_interval.min <= t_interval.min &&
-                              r_interval.max >= t_interval.max) &&
-                    false) {
+                              r_interval.max >= t_interval.max)) {
                     lhs[i] = func_to_update_args[i];
                     // Replace other occurence of rvar in lhs
                     for (int j = 0; j < (int) lhs.size(); j++) {

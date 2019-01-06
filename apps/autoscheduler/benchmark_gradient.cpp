@@ -1,5 +1,6 @@
 #include "Halide.h"
 #include "Derivative.h"
+#include "DerivativeUtils.h"
 #include "halide_benchmark.h"
 
 #include <dlfcn.h>
@@ -8,6 +9,132 @@
 
 using namespace Halide;
 using namespace Halide::Tools;
+
+struct PrintFuncOptions {
+    bool ignore_non_adjoints = false;
+    bool ignore_bc = false;
+    int depth = -1;
+    std::map<std::string, Expr> variables;
+};
+
+void print_func(const Func &func, const PrintFuncOptions &options = PrintFuncOptions{}) {
+    Internal::debug(0) << "Printing function:" << func.name() << "\n";
+    // Topologically sort the functions
+    std::map<std::string, Internal::Function> env = find_transitive_calls(func.function());
+    std::vector<std::string> order = realization_order({ func.function() }, env).first;
+    std::vector<Func> funcs;
+    funcs.reserve(order.size());
+    for (const auto &func_name : order) {
+        Func func(env[func_name]);
+        funcs.push_back(func);
+    }
+
+    int lowest_index = 0;
+    if (options.depth >= 0) {
+        lowest_index = (int) funcs.size() - 1 - options.depth;
+    }
+
+    for (int i = (int) funcs.size() - 1; i >= lowest_index; i--) {
+        const char *ce = "constant_exterior";
+        const char *re = "repeat_edge";
+        if (options.ignore_bc && (funcs[i].name().substr(0, strlen(ce)) == std::string(ce) ||
+                                  funcs[i].name().substr(0, strlen(re)) == std::string(re) ||
+                                  funcs[i].name().find("_ce") != std::string::npos)) {
+            continue;
+        }
+        if (options.ignore_non_adjoints && funcs[i].name().find("_d_def__") == std::string::npos) {
+            continue;
+        }
+        Func func = funcs[i];
+        Internal::debug(0) << "  funcs[" << i << "]: " << func.name() << "\n";
+        for (int update_id = -1; update_id < func.num_update_definitions(); update_id++) {
+            Internal::ReductionDomain rdom;
+            if (update_id >= 0) {
+                Internal::debug(0) << "    update:" << func.name() << "(";
+                if (func.update_args(update_id).size() > 0) {
+                    Expr e = func.update_args(update_id)[0];
+                    for (const auto &it : options.variables) {
+                        e = substitute(it.first, it.second, e);
+                    }
+                    Internal::debug(0) << Internal::simplify(e);
+                    for (int i = 1; i < (int) func.update_args(update_id).size(); i++) {
+                        Expr e = func.update_args(update_id)[i];
+                        for (const auto &it : options.variables) {
+                            e = substitute(it.first, it.second, e);
+                        }
+                        Internal::debug(0) << ", " << Internal::simplify(e);
+                    }
+                }
+                Internal::debug(0) << ") =";
+                auto vals = func.update_values(update_id).as_vector();
+                for (auto val : vals) {
+                    Expr e = val;
+                    for (const auto &it : options.variables) {
+                        e = substitute(it.first, it.second, e);
+                    }
+                    Internal::debug(0) << " " << Internal::simplify(e);
+                }
+                Internal::debug(0) << "\n";
+                rdom = Internal::extract_rdom(Internal::simplify(func.update_value(update_id)));
+            } else {
+                Internal::debug(0) << "    " << func.name() << "(";
+                if (func.args().size() > 0) {
+                    Internal::debug(0) << func.args()[0];
+                    for (int i = 1; i < (int) func.args().size(); i++) {
+                        Internal::debug(0) << ", " << Internal::simplify(func.args()[i]);
+                    }
+                }
+                Internal::debug(0) << ") =";
+                auto vals = func.values().as_vector();
+                for (auto val : vals) {
+                    Expr e = val;
+                    for (const auto &it : options.variables) {
+                        e = substitute(it.first, it.second, e);
+                    }
+                    Internal::debug(0) << " " << Internal::simplify(e);
+                }
+                Internal::debug(0) << "\n";
+                rdom = Internal::extract_rdom(Internal::simplify(func.value()));
+            }
+
+            if (rdom.defined()) {
+                Internal::debug(0) << "    RDom:";
+                for (int i = 0; i < (int) rdom.domain().size(); i++) {
+                    Internal::debug(0) << " (" << Internal::simplify(rdom.domain()[i].min) << ", " << Internal::simplify(rdom.domain()[i].extent) << ")";
+                }
+                Internal::debug(0) << "\n";
+            }
+        }
+    }
+}
+
+/*
+void post_gradient_transform(std::vector<Func> &outputs) {
+    std::map<std::string, Internal::Function> env;
+    for (auto output : outputs) {
+        std::map<std::string, Internal::Function> e = find_transitive_calls(output.function());
+        for (auto it : e) {
+            env[it->first] = it->second;
+        }
+    }
+    std::vector<Internal::Function> output_functions;
+    for (auto output : outputs) {
+        output_functions.push_back(output.function());
+    }
+    std::vector<std::string> order = realization_order(output_functions, env).first;
+    std::vector<Func> funcs;
+    funcs.reserve(order.size());
+    for (const auto &func_name : order) {
+        Func func(env[func_name]);
+        funcs.push_back(func);
+    }
+
+    std::map<std::string, Box> bounds = inference_bounds(outputs);
+    for (auto func : funcs) {
+        // Search for f(
+    }
+}
+*/
 
 int main(int argc, char **argv) {
     std::string use_master_autoscheduler =
@@ -30,7 +157,7 @@ int main(int argc, char **argv) {
 
     Var x("x"), y("y");
 
-    if (1) {
+    if (0) {
         // For time calibration
         std::cout << "1D box filter without gradient" << std::endl;
         int n = 1000000;
@@ -64,6 +191,7 @@ int main(int argc, char **argv) {
 
         auto d = propagate_adjoints(h);
         Func d_f = d(f);
+        print_func(d_f);
 
         d_f.estimate(x, 0, n);
 
@@ -77,7 +205,7 @@ int main(int argc, char **argv) {
         std::cout << "best time:" << best_time << std::endl;
     }
 
-    if (1) {
+    if (0) {
         std::cout << "1D conv with gradient" << std::endl;
         int n = 1000000;
         Func f("f"), g("g"), h("h"), k("k");
