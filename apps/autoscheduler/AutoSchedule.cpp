@@ -42,6 +42,11 @@
 namespace Halide {
 namespace Internal {
 
+// How small should an innermost loop cluster be before you just
+// entirely unroll the thing. Sized for an architecture with 16 vector
+// registers.
+const int kUnrollLimit = 16;
+
 namespace {
 
 using std::string;
@@ -550,6 +555,52 @@ struct LoopNest {
                 feat.bytes_at_task = (feat.bytes_at_realization + params.parallelism - 1) / params.parallelism;
                 feat.innermost_bytes_at_task = std::min(feat.bytes_at_task, feat.innermost_bytes_at_realization);
             }
+
+            feat.unique_bytes_read_per_task = 0;
+            feat.unique_lines_read_per_task = 0;
+
+            vector<const FunctionDAG::Edge *> pending;
+            set<const FunctionDAG::Node *> done;
+            for (const auto *e : stage->incoming_edges) {
+                pending.push_back(e);
+            }
+            while (!pending.empty()) {
+                const auto *e = pending.back();
+                pending.pop_back();
+                if (done.count(e->producer)) continue;
+                done.insert(e->producer);
+                const auto &site = sites.get(&(e->producer->stages[0]));
+                if (site.store->is_root()) {
+                    const auto &b = get_bounds(e->producer);
+                    int64_t bytes = e->producer->bytes_per_point, lines = 1;
+                    int64_t max_extent = 1;
+                    int vector_dim = (e->producer->is_input ? 0 :
+                                      site.produce != nullptr ? site.produce->vector_dim :
+                                      -1);
+                    for (int i = 0; i < e->producer->func.dimensions(); i++) {
+                        int64_t extent = b->region_required(i).extent();
+                        max_extent = std::max(extent, max_extent);
+                        bytes *= extent;
+                        if (i != vector_dim) {
+                            lines *= extent;
+                        }
+                    }
+                    if (!e->producer->is_input && site.produce == nullptr) {
+                        lines /= max_extent;
+                    }
+                    feat.unique_bytes_read_per_task += bytes;
+                    feat.unique_lines_read_per_task += lines;
+
+                } else if (site.produce != nullptr) {
+                    // Computation must be nested inside this task or inlined into it.
+                    for (const auto &s : e->producer->stages) {
+                        for (const auto *e2 : s.incoming_edges) {
+                            pending.push_back(e2);
+                        }
+                    }
+                }
+            }
+
         }
 
         if (at_production) {
@@ -603,7 +654,7 @@ struct LoopNest {
 
         if (innermost) {
             bool parent_unrolled =
-                (feat.innermost_pure_loop_extent <= 16 &&
+                (feat.innermost_pure_loop_extent <= kUnrollLimit &&
                  parent->node == node);
 
             if (parent_unrolled) {
@@ -625,7 +676,7 @@ struct LoopNest {
 
         *working_set += working_set_here;
 
-        int64_t bytes_loaded = 0, lines_loaded = 0, allocation_bytes_loaded = 0, off_core_bytes_loaded = 0, off_core_lines_loaded = 0;
+        int64_t bytes_loaded = 0, lines_loaded = 0, allocation_bytes_loaded = 0;
         double num_dense_loads = 0, num_broadcasts = 0, num_gathers = 0, num_stride_2_loads = 0, num_stride_3_loads = 0, num_stride_4_loads = 0, num_loads = 0;
         if (innermost || at_production) { // These are the sites at which we compute load footprints
             // Pick the site at which we will compute the footprint relationship
@@ -858,11 +909,6 @@ struct LoopNest {
                         bytes_loaded += footprint;
                         lines_loaded += line_footprint;
                     }
-
-                    if (at_production && producer_store_site->is_root()) {
-                        off_core_bytes_loaded += task_footprint;
-                        off_core_lines_loaded += task_line_footprint;
-                    }
                 }
             }
         }
@@ -875,8 +921,6 @@ struct LoopNest {
             feat.allocation_bytes_read_per_realization = allocation_bytes_loaded;
             feat.unique_bytes_read_per_realization = bytes_loaded;
             feat.unique_lines_read_per_realization = lines_loaded;
-            feat.unique_bytes_read_per_task = off_core_bytes_loaded;
-            feat.unique_lines_read_per_task = off_core_lines_loaded;
 
             if (!at_pure_production) {
                 // Also pessimistically assume this update definition relies on the entirety of the produced region so far.
@@ -952,7 +996,6 @@ struct LoopNest {
             // Use the bounds estimate
             for (int i = 0; i < f->func.dimensions(); i++) {
                 bound->region_required(i) = f->estimated_region_required[i];
-                internal_assert(!bound->region_required(i).constant_extent()) << "We don't handle .bound directives yet. This shouldn't be constant\n";
             }
         } else {
             internal_assert(!f->outgoing_edges.empty())
@@ -1275,7 +1318,7 @@ struct LoopNest {
             extent = (extent + outer_extent - 1) / outer_extent;
             // Pick a better representative loop iteration
             min += (outer_extent / 2) * extent;
-            bool compile_time_constant_bounds = (outer_extent > 1) && stage->loop[i].pure;
+            bool compile_time_constant_bounds = p.constant_extent() || ((outer_extent > 1) && stage->loop[i].pure);
             b->loops(stage_idx, i) = Span(min, min + extent - 1, compile_time_constant_bounds);
         }
         outer->set_bounds(node, b);
@@ -1737,7 +1780,7 @@ struct LoopNest {
                             }
                         }
 
-                        if (product_of_pure_loops <= 16 && all_pure_loops_constant_size) {
+                        if (product_of_pure_loops <= kUnrollLimit && all_pure_loops_constant_size) {
                             // There's a hope we can fit anything compute-at this level into registers if we fully unroll
                             // TODO: 16 should be the number of vector registers in the architecture
                             std::stable_sort(state.vars.begin(), state.vars.begin() + symbolic_loop.size(),
@@ -2415,7 +2458,7 @@ struct State {
                     t.swap(o.tiling);
 
                     // Compute max idle cores across the other stages of the Func
-                    int64_t min_total = 0;
+                    int64_t min_total = 0, max_total = 0;
                     o.idle_core_wastage = 1;
                     for (const auto &c : root->children) {
                         if (c->node == node) {
@@ -2430,6 +2473,7 @@ struct State {
                             } else {
                                 min_total = total;
                             }
+                            max_total = std::max(max_total, total);
                             const double tasks_per_core = ((double)total) / params.parallelism;
                             o.idle_core_wastage = std::max(o.idle_core_wastage,
                                                            std::ceil(tasks_per_core) / tasks_per_core);
@@ -2437,8 +2481,11 @@ struct State {
                     }
 
                     // Filter out the less useful options
-                    if (min_total > params.parallelism * 64) continue;
-                    if (min_total < params.parallelism && !o.entire) continue;
+                    bool ok =
+                        ((o.entire || min_total > params.parallelism) &&
+                         (max_total <= params.parallelism * 64));
+
+                    if (!ok) continue;
 
                     options.emplace_back(std::move(o));
                 }
