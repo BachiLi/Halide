@@ -397,6 +397,7 @@ int main(int argc, char **argv) {
         } else {
             Buffer<float> d_in_buffer(nx, ny),
                           d_k_inter_buffer(wx, wy, nout_x, nout_y),
+                          d_k_inter_buffer2(wx, wy, nout_x, nout_y),
                           d_k_buffer(wx, wy);
             Pipeline p_grad = Pipeline({d_in, d_k_inter});
             p_grad.auto_schedule(target, params);
@@ -404,7 +405,7 @@ int main(int argc, char **argv) {
             Func d_k("d_k");
             d_k(kx, ky) += d_k_inter_buffer(kx, ky, r_f.x, r_f.y);
             RVar rxo, rxi, ryo, ryi;
-            int tile_width = 32, tile_height = 32;
+            int tile_width = 64, tile_height = 64;
             d_k.update(0)
                .split(r_f.x, rxo, rxi, tile_width, TailStrategy::GuardWithIf)
                .split(r_f.y, ryo, ryi, tile_height, TailStrategy::GuardWithIf);
@@ -417,13 +418,14 @@ int main(int argc, char **argv) {
             Var tile_index("tile_index");
             k_reduction.compute_root()
                        .fuse(xo, yo, tile_index)
-                       .parallel(tile_index);
-                       //.vectorize(xi);
+                       .parallel(tile_index)
+                       .bound(xi, 0, tile_width)
+                       .vectorize(xi);
             k_reduction.update()
                        .reorder({ryi, xi, xo, yo})
                        .fuse(xo, yo, tile_index)
-                       .parallel(tile_index);
-                       //.vectorize(xi);
+                       .parallel(tile_index)
+                       .vectorize(xi);
             d_k.compute_root()
                .update();
 
