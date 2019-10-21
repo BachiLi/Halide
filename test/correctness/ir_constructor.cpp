@@ -52,7 +52,8 @@ void run(JITModule m,
     _halide_user_assert(exit == 0);
 }
 
-int main(int argc, char *argv[]) {
+/// Store 100 to a scalar function
+void store_to_scalar() {
     Buffer<int> out = Buffer<int>::make_scalar("f");
     Parameter f = parameter(out);
 
@@ -62,6 +63,30 @@ int main(int argc, char *argv[]) {
 
     JITModule m = compile({}, {out}, s);
     run(m, {}, {out});
-    std::cout << "out:" << out() << std::endl;
+    _halide_user_assert(out() == 100);
+}
+
+/// Load from a scalar input, multiply by 2.
+void load_store_scalar() {
+    Buffer<int> in = Buffer<int>::make_scalar("f");
+    Buffer<int> out = Buffer<int>::make_scalar("g");
+    Parameter f = parameter(in);
+    Parameter g = parameter(out);
+
+    Stmt s;
+    Expr e = Load::make(in.type(), in.name(), 0, in, f, const_true(), ModulusRemainder());
+    e = 2 * e; // multiply by 2
+    s = Store::make(g.name(), e, 0, g, const_true(), ModulusRemainder());
+    s = ProducerConsumer::make_produce(g.name(), s);
+
+    JITModule m = compile({in}, {out}, s);
+    in() = 3;
+    run(m, {in}, {out});
+    _halide_user_assert(out() == 6);
+}
+
+int main(int argc, char *argv[]) {
+    store_to_scalar();
+    load_store_scalar();
     return 0;
 }
