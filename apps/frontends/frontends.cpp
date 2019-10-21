@@ -95,8 +95,28 @@ void load_store_scalar() {
     _halide_user_assert(out() == 6);
 }
 
+/// Same as load_store_scalar, but with Call and Provide
+void call_provide_scalar() {
+    Buffer<int> in = Buffer<int>::make_scalar("f");
+    Buffer<int> out = Buffer<int>::make_scalar("g");
+    Parameter f = parameter(in);
+    Parameter g = parameter(out);
+
+    Stmt s;
+    Expr e = Call::make(in, {});
+    e = 2 * e; // multiply by 2
+    s = Provide::make(g.name(), {e}, {});
+    s = ProducerConsumer::make_produce(g.name(), s);
+
+    JITModule m = compile({in}, {out}, {g}, s);
+    in() = 3;
+    run(m, {in}, {out});
+    _halide_user_assert(out() == 6);
+}
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
+    call_provide_scalar();
     return 0;
 }
