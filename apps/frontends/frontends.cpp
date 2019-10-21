@@ -1,4 +1,5 @@
 #include "Halide.h"
+#include "Lower.h"
 #include <vector>
 
 using namespace Halide;
