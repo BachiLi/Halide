@@ -1,7 +1,7 @@
 include ../support/Makefile.inc
 
-CXX_SOURCES = frontends.cpp Lower.cpp
-CXX_HEADERS = Lower.h
+CXX_SOURCES = frontends.cpp Lower.cpp StorageFlattening.cpp
+CXX_HEADERS = Errors.h StorageFlattening.h Lower.h
 
 all: $(BIN)/test
 

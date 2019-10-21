@@ -5,6 +5,8 @@
 using namespace Halide;
 using namespace Halide::Internal;
 using std::vector;
+using std::map;
+using std::string;
 
 Parameter parameter(const Buffer<> &buffer) {
     return Parameter(buffer.type(),
@@ -15,11 +17,17 @@ Parameter parameter(const Buffer<> &buffer) {
 
 JITModule compile(const vector<Buffer<>> &inputs,
                   const vector<Buffer<>> &outputs,
+                  const vector<Parameter> &output_params,
                   Stmt s) {
     Target target = get_jit_target_from_environment();
     target.set_feature(Target::NoBoundsQuery, true);
     target.set_feature(Target::NoAsserts, true);
     target.set_feature(Target::JIT, true);
+
+    map<string, Parameter> output_params_map;
+    for (auto p : output_params) {
+        output_params_map[p.name()] = p;
+    }
 
     vector<Argument> arguments;
     for (auto b : inputs) {
@@ -31,6 +39,7 @@ JITModule compile(const vector<Buffer<>> &inputs,
     const std::string &name = "foo";
     Module module = lower_from_stmt(s,
                                     name,
+                                    output_params_map,
                                     target,
                                     arguments,
                                     LinkageType::ExternalPlusMetadata);
@@ -62,7 +71,7 @@ void store_to_scalar() {
     s = Store::make(f.name(), 100, 0, f, const_true(), ModulusRemainder());
     s = ProducerConsumer::make_produce(f.name(), s);
 
-    JITModule m = compile({}, {out}, s);
+    JITModule m = compile({}, {out}, {f}, s);
     run(m, {}, {out});
     _halide_user_assert(out() == 100);
 }
@@ -80,7 +89,7 @@ void load_store_scalar() {
     s = Store::make(g.name(), e, 0, g, const_true(), ModulusRemainder());
     s = ProducerConsumer::make_produce(g.name(), s);
 
-    JITModule m = compile({in}, {out}, s);
+    JITModule m = compile({in}, {out}, {g}, s);
     in() = 3;
     run(m, {in}, {out});
     _halide_user_assert(out() == 6);
