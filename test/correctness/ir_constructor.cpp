@@ -5,6 +5,13 @@ using namespace Halide;
 using namespace Halide::Internal;
 using std::vector;
 
+Parameter parameter(const Buffer<> &buffer) {
+    return Parameter(buffer.type(),
+                     true /* is_buffer */,
+                     buffer.dimensions(),
+                     buffer.name());
+}
+
 JITModule compile(const vector<Buffer<>> &inputs,
                   const vector<Buffer<>> &outputs,
                   Stmt s) {
@@ -47,7 +54,7 @@ void run(JITModule m,
 
 int main(int argc, char *argv[]) {
     Buffer<int> out = Buffer<int>::make_scalar("f");
-    Parameter f(Int(32), true /*is_buffer*/, 0, out.name());
+    Parameter f = parameter(out);
 
     Stmt s;
     s = Store::make(f.name(), 100, 0, f, const_true(), ModulusRemainder());
