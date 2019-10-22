@@ -11,6 +11,7 @@ using std::map;
 using std::string;
 using std::pair;
 using std::function;
+using std::to_string;
 
 Parameter parameter(const Buffer<> &buffer) {
     return Parameter(buffer.type(),
@@ -110,6 +111,14 @@ struct InOutBuffer {
         return p;
     }
 
+    Expr min(int index = 0) const {
+        return Variable::make(Int(32), name() + ".min." + to_string(index));
+    }
+
+    Expr extent(int index = 0) const {
+        return Variable::make(Int(32), name() + ".extent." + to_string(index));
+    }
+
     Parameter p;
 };
 
@@ -142,7 +151,6 @@ InOutBufferRef InOutBuffer::operator()(Expr x, Args &&... args) const {
     vector<Expr> collected_args{x, std::forward<Args>(args)...};
     return this->operator()(collected_args);
 }
-
 /////////////////////////////////////////////////////////
 
 /// Store 100 to a scalar function
@@ -201,9 +209,7 @@ void provide_loop() {
     InOutBuffer f(out);
 
     Stmt s;
-    Expr min = Variable::make(Int(32), out.name() + ".min.0");
-    Expr extent = Variable::make(Int(32), out.name() + ".extent.0");
-    s = ForAll({"x"}, {{min, extent}}, [&]() {
+    s = ForAll({"x"}, {{f.min(), f.extent()}}, [&]() {
         Expr x = Variable::make(Int(32), "x");
         return f(x) = x;
     });
@@ -222,11 +228,7 @@ void provide_loop_multidim() {
     InOutBuffer f(out);
 
     Stmt s;
-    Expr x_min = Variable::make(Int(32), out.name() + ".min.0");
-    Expr x_extent = Variable::make(Int(32), out.name() + ".extent.0");
-    Expr y_min = Variable::make(Int(32), out.name() + ".min.1");
-    Expr y_extent = Variable::make(Int(32), out.name() + ".extent.1");    
-    s = ForAll({"x", "y"}, {{x_min, x_extent}, {y_min, y_extent}}, [&]() {
+    s = ForAll({"x", "y"}, {{f.min(0), f.extent(0)}, {f.min(1), f.extent(1)}}, [&]() {
         Expr x = Variable::make(Int(32), "x");
         Expr y = Variable::make(Int(32), "y");
         return f(x, y) = x + y;
@@ -250,11 +252,7 @@ void call_provide_loop_multidim() {
     InOutBuffer g(out);
 
     Stmt s;
-    Expr x_min = Variable::make(Int(32), out.name() + ".min.0");
-    Expr x_extent = Variable::make(Int(32), out.name() + ".extent.0");
-    Expr y_min = Variable::make(Int(32), out.name() + ".min.1");
-    Expr y_extent = Variable::make(Int(32), out.name() + ".extent.1");
-    s = ForAll({"x", "y"}, {{x_min, x_extent}, {y_min, y_extent}}, [&]() {
+    s = ForAll({"x", "y"}, {{g.min(0), g.extent(0)}, {g.min(1), g.extent(1)}}, [&]() {
         Expr x = Variable::make(Int(32), "x");
         Expr y = Variable::make(Int(32), "y");
         return g(x, y) = 2 * f(x, y);
@@ -290,9 +288,7 @@ void in_place_bubble_sort() {
     //     }
     // }
     Stmt s;
-    Expr f_min = Variable::make(Int(32), in_out.name() + ".min.0");
-    Expr f_extent = Variable::make(Int(32), in_out.name() + ".extent.0");
-    s = ForAll({"j", "i"}, {{f_min + 1, f_extent - 1}, {f_min, f_extent}}, [&]() {
+    s = ForAll({"j", "i"}, {{f.min() + 1, f.extent() - 1}, {f.min(), f.extent()}}, [&]() {
         Expr i = Variable::make(Int(32), "i");
         Expr j = Variable::make(Int(32), "j");
         // if (f(j - 1) > f(j))
