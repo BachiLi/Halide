@@ -194,6 +194,53 @@ void call_provide_loop_multidim() {
     }
 }
 
+void in_place_bubble_sort() {
+    Buffer<int> in_out = Buffer<int>(16, "f");
+    Parameter f = parameter(in_out);
+
+    // for (int i = 0; i < size; i++) {
+    //     for (int j = 1; j < size; j++) {
+    //         if (f(j - 1) > f(j)) {
+    //             Allocate(_t);
+    //             _t = f(j - 1);
+    //             f(j - 1) = f(j);
+    //             f(j) = _t;
+    //         }
+    //     }
+    // }
+    Stmt s;
+    Expr i = Variable::make(Int(32), "i");
+    Expr j = Variable::make(Int(32), "j");
+    Expr prev = Call::make(in_out, {j - 1});
+    Expr curr = Call::make(in_out, {j});
+    // _t = f(j - 1)
+    s = Store::make("_t", prev, 0, Parameter(), const_true(), ModulusRemainder());
+    // f(j - 1) = f(j)
+    s = Block::make(s, Provide::make(f.name(), {curr}, {j - 1}));
+    // f(j) = _t
+    Expr _t = Load::make(Int(32), "_t", 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
+    s = Block::make(s, Provide::make(f.name(), {_t}, {j}));
+    // Allocate(-t)
+    s = Allocate::make("_t", Int(32), MemoryType::Register, {}, const_true(), s);
+    // if (f(j - 1) > f(j))
+    s = IfThenElse::make(prev > curr, s);
+    Expr f_min = Variable::make(Int(32), in_out.name() + ".min.0");
+    Expr f_extent = Variable::make(Int(32), in_out.name() + ".extent.0");
+    s = For::make("j", f_min + 1, f_extent, ForType::Serial, DeviceAPI::Host, s);
+    s = For::make("i", f_min, f_extent, ForType::Serial, DeviceAPI::Host, s);
+    s = ProducerConsumer::make_produce(f.name(), s);
+    std::cout << s << std::endl;
+
+    for (int i = 0; i < 16; i++) {
+        in_out(i) = 15 - i;
+    }
+    JITModule m = compile({in_out}, {in_out}, {f}, s);
+    run(m, {in_out}, {in_out});
+    for (int i = 0; i < 16; i++) {
+        _halide_user_assert(in_out(i) == i);
+    }
+}
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
@@ -201,5 +248,6 @@ int main(int argc, char *argv[]) {
     provide_loop();
     provide_loop_multidim();
     call_provide_loop_multidim();
+    in_place_bubble_sort();
     return 0;
 }
