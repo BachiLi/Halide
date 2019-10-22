@@ -331,17 +331,15 @@ void in_place_bubble_sort() {
     LoopVar j("j", f.min() + 1, f.extent() - 1);
     LoopVar i("i", f.min(), f.extent());
     s = ForAll({j, i}, [&]() {
-        Stmt s = If(f(j - 1) > f(j), [&]() {
-            Stmt s = Int32([&](TempVar t) {
+        return If(f(j - 1) > f(j), [&]() {
+            return Int32([&](TempVar t) {
                 return Block::make({
                     t = f(j - 1),
                     f(j - 1) = f(j),
                     f(j) = t
                 });
             });
-            return s;
         });
-        return s;
     });
     s = ProducerConsumer::make_produce(f.name(), s);
 
