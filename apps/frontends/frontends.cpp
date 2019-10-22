@@ -82,10 +82,9 @@ struct LoopVar {
 };
 
 Stmt ForAll(const vector<LoopVar> &vars,
-            function<Stmt()> f,
+            Stmt s,
             ForType for_type = ForType::Serial,
             DeviceAPI device_api = DeviceAPI::Host) {
-    Stmt s = f();
     // Build loop nest
     for (LoopVar var : vars) {
         s = For::make(var.name,
@@ -99,15 +98,14 @@ Stmt ForAll(const vector<LoopVar> &vars,
 }
 
 Stmt ForAll(const LoopVar &var,
-            function<Stmt()> f,
+            Stmt s,
             ForType for_type = ForType::Serial,
             DeviceAPI device_api = DeviceAPI::Host) {
-    return ForAll(vector<LoopVar>{var}, f, for_type, device_api);
+    return ForAll(vector<LoopVar>{var}, s, for_type, device_api);
 }
 
 Stmt If(Expr condition,
-        function<Stmt()> f) {
-    Stmt s = f();
+        Stmt s) {
     return IfThenElse::make(condition, s);
 }
 
@@ -170,7 +168,7 @@ InOutBufferRef InOutBuffer::operator()(Expr x, Args &&... args) const {
 }
 
 struct TempVar {
-    TempVar(Type t, const string &name)
+    TempVar(Type t, const string &name = unique_name('t'))
         : t(t), name(name) {}
 
     Stmt operator=(Expr e) {
@@ -185,12 +183,11 @@ struct TempVar {
     string name;
 };
 
-Stmt Int32(function<Stmt(TempVar)> f) {
-    TempVar t(Int(32), unique_name('t'));
-    Stmt s = f(t);
+Stmt Scope_(TempVar t, Stmt s) {
     s = Allocate::make(t.name, Int(32), MemoryType::Register, {}, const_true(), s);
     return s;
 }
+
 /////////////////////////////////////////////////////////
 
 /// Store 100 to a scalar function
@@ -250,9 +247,9 @@ void provide_loop() {
 
     Stmt s;
     LoopVar x("x", f.min(), f.extent());
-    s = ForAll(x, [&]() {
-        return f(x) = x;
-    });
+    s = ForAll(x,
+        f(x) = x
+    );
     s = ProducerConsumer::make_produce(f.name(), s);
 
     JITModule m = compile({}, {out}, {f.param()}, s);
@@ -270,9 +267,9 @@ void provide_loop_multidim() {
     Stmt s;
     LoopVar x("x", f.min(0), f.extent(0));
     LoopVar y("y", f.min(1), f.extent(1));
-    s = ForAll({x, y}, [&]() {
-        return f(x, y) = x + y;
-    });
+    s = ForAll({x, y},
+        f(x, y) = x + y
+    );
     s = ProducerConsumer::make_produce(f.name(), s);
 
     JITModule m = compile({}, {out}, {f.param()}, s);
@@ -294,9 +291,9 @@ void call_provide_loop_multidim() {
     Stmt s;
     LoopVar x("x", g.min(0), g.extent(0));
     LoopVar y("y", g.min(1), g.extent(1));
-    s = ForAll({x, y}, [&]() {
-        return g(x, y) = 2 * f(x, y);
-    });
+    s = ForAll({x, y}, 
+        g(x, y) = 2 * f(x, y)
+    );
     s = ProducerConsumer::make_produce(g.name(), s);
 
     for (int i = 0; i < 16; i++) {
@@ -330,17 +327,16 @@ void in_place_bubble_sort() {
     Stmt s;
     LoopVar j("j", f.min() + 1, f.extent() - 1);
     LoopVar i("i", f.min(), f.extent());
-    s = ForAll({j, i}, [&]() {
-        return If(f(j - 1) > f(j), [&]() {
-            return Int32([&](TempVar t) {
-                return Block::make({
-                    t = f(j - 1),
-                    f(j - 1) = f(j),
-                    f(j) = t
-                });
-            });
-        });
-    });
+    TempVar t(Int(32));
+    s = ForAll({j, i},
+        If(f(j - 1) > f(j),
+            Scope_(t, Block::make({
+                t = f(j - 1),
+                f(j - 1) = f(j),
+                f(j) = t
+            }))
+        )
+    );
     s = ProducerConsumer::make_produce(f.name(), s);
 
     for (int i = 0; i < 16; i++) {
