@@ -220,16 +220,15 @@ void in_place_bubble_sort() {
     // f(j) = _t
     Expr _t = Load::make(Int(32), "_t", 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
     s = Block::make(s, Provide::make(f.name(), {_t}, {j}));
-    // Allocate(-t)
+    // Allocate(_t)
     s = Allocate::make("_t", Int(32), MemoryType::Register, {}, const_true(), s);
     // if (f(j - 1) > f(j))
     s = IfThenElse::make(prev > curr, s);
     Expr f_min = Variable::make(Int(32), in_out.name() + ".min.0");
     Expr f_extent = Variable::make(Int(32), in_out.name() + ".extent.0");
-    s = For::make("j", f_min + 1, f_extent, ForType::Serial, DeviceAPI::Host, s);
+    s = For::make("j", f_min + 1, f_extent - 1, ForType::Serial, DeviceAPI::Host, s);
     s = For::make("i", f_min, f_extent, ForType::Serial, DeviceAPI::Host, s);
     s = ProducerConsumer::make_produce(f.name(), s);
-    std::cout << s << std::endl;
 
     for (int i = 0; i < 16; i++) {
         in_out(i) = 15 - i;
