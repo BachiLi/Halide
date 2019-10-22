@@ -86,6 +86,12 @@ Stmt ForAll(const vector<string> &names,
     }
     return s;
 }
+
+Stmt If(Expr condition,
+        function<Stmt()> f) {
+    Stmt s = f();
+    return IfThenElse::make(condition, s);
+}
 /////////////////////////////////////////////////////////
 
 /// Store 100 to a scalar function
@@ -243,17 +249,19 @@ void in_place_bubble_sort() {
         Expr j = Variable::make(Int(32), "j");
         Expr prev = Call::make(in_out, {j - 1});
         Expr curr = Call::make(in_out, {j});
-        // _t = f(j - 1)
-        Stmt s = Store::make("_t", prev, 0, Parameter(), const_true(), ModulusRemainder());
-        // f(j - 1) = f(j)
-        s = Block::make(s, Provide::make(f.name(), {curr}, {j - 1}));
-        // f(j) = _t
-        Expr _t = Load::make(Int(32), "_t", 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
-        s = Block::make(s, Provide::make(f.name(), {_t}, {j}));
-        // Allocate(_t)
-        s = Allocate::make("_t", Int(32), MemoryType::Register, {}, const_true(), s);
         // if (f(j - 1) > f(j))
-        s = IfThenElse::make(prev > curr, s);
+        Stmt s = If(prev > curr, [&]() {
+            // _t = f(j - 1)
+            Stmt s = Store::make("_t", prev, 0, Parameter(), const_true(), ModulusRemainder());
+            // f(j - 1) = f(j)
+            s = Block::make(s, Provide::make(f.name(), {curr}, {j - 1}));
+            // f(j) = _t
+            Expr _t = Load::make(Int(32), "_t", 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
+            s = Block::make(s, Provide::make(f.name(), {_t}, {j}));
+            // Allocate(_t)
+            s = Allocate::make("_t", Int(32), MemoryType::Register, {}, const_true(), s);
+            return s;
+        });
         return s;
     });
     s = ProducerConsumer::make_produce(f.name(), s);
