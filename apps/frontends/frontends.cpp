@@ -134,10 +134,37 @@ void provide_loop() {
     }
 }
 
+/// f(x, y) = x + y
+void provide_loop_multidim() {
+    Buffer<int> out = Buffer<int>(16, 8, "f");
+    Parameter f = parameter(out);
+
+    Stmt s;
+    Expr x = Variable::make(Int(32), "x");
+    Expr y = Variable::make(Int(32), "y");
+    s = Provide::make(f.name(), {x + y}, {x, y});
+    Expr x_min = Variable::make(Int(32), out.name() + ".min.0");
+    Expr x_extent = Variable::make(Int(32), out.name() + ".extent.0");
+    s = For::make("x", x_min, x_extent, ForType::Serial, DeviceAPI::Host, s);
+    Expr y_min = Variable::make(Int(32), out.name() + ".min.1");
+    Expr y_extent = Variable::make(Int(32), out.name() + ".extent.1");
+    s = For::make("y", y_min, y_extent, ForType::Serial, DeviceAPI::Host, s);
+    s = ProducerConsumer::make_produce(f.name(), s);
+
+    JITModule m = compile({}, {out}, {f}, s);
+    run(m, {}, {out});
+    for (int i = 0; i < 16; i++) {
+        for (int j = 0; j < 8; j++) {
+            _halide_user_assert(out(i, j) == i + j);
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
     call_provide_scalar();
     provide_loop();
+    provide_loop_multidim();
     return 0;
 }

@@ -22,7 +22,7 @@ Module lower_from_stmt(Stmt s,
 
     debug(1) << "Unpacking buffer arguments...\n";
     s = unpack_buffers(s);
-    debug(2) << "Lowering after unpacking buffer arguments...\n"
+    debug(1) << "Lowering after unpacking buffer arguments...\n"
              << s << "\n\n";
 
     std::vector<std::string> namespaces;
