@@ -69,23 +69,40 @@ void run(JITModule m,
 
 /////////////////////////////////////////////////////////
 // Helpers for constructing statements
-Stmt ForAll(const vector<string> &names,
-            const vector<pair<Expr, Expr>> &ranges,
+struct LoopVar {
+    LoopVar(const string &name, Expr min, Expr extent)
+        : name(name), min(min), extent(extent) {}
+
+    operator Expr() const {
+        return Variable::make(Int(32), name);
+    }
+
+    string name;
+    Expr min, extent;
+};
+
+Stmt ForAll(const vector<LoopVar> &vars,
             function<Stmt()> f,
             ForType for_type = ForType::Serial,
             DeviceAPI device_api = DeviceAPI::Host) {
-    user_assert(names.size() == ranges.size());
     Stmt s = f();
     // Build loop nest
-    for (int i = 0; i < (int)names.size(); i++) {
-        s = For::make(names[i],
-                      ranges[i].first,
-                      ranges[i].second,
+    for (LoopVar var : vars) {
+        s = For::make(var.name,
+                      var.min,
+                      var.extent,
                       for_type,
                       device_api,
                       s);
     }
     return s;
+}
+
+Stmt ForAll(const LoopVar &var,
+            function<Stmt()> f,
+            ForType for_type = ForType::Serial,
+            DeviceAPI device_api = DeviceAPI::Host) {
+    return ForAll(vector<LoopVar>{var}, f, for_type, device_api);
 }
 
 Stmt If(Expr condition,
@@ -151,6 +168,29 @@ InOutBufferRef InOutBuffer::operator()(Expr x, Args &&... args) const {
     vector<Expr> collected_args{x, std::forward<Args>(args)...};
     return this->operator()(collected_args);
 }
+
+struct TempVar {
+    TempVar(Type t, const string &name)
+        : t(t), name(name) {}
+
+    Stmt operator=(Expr e) {
+        return Store::make(name, e, 0, Parameter(), const_true(), ModulusRemainder());
+    }
+
+    operator Expr() const {
+        return Load::make(t, name, 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
+    }
+
+    Type t;
+    string name;
+};
+
+Stmt Int32(function<Stmt(TempVar)> f) {
+    TempVar t(Int(32), unique_name('t'));
+    Stmt s = f(t);
+    s = Allocate::make(t.name, Int(32), MemoryType::Register, {}, const_true(), s);
+    return s;
+}
 /////////////////////////////////////////////////////////
 
 /// Store 100 to a scalar function
@@ -209,8 +249,8 @@ void provide_loop() {
     InOutBuffer f(out);
 
     Stmt s;
-    s = ForAll({"x"}, {{f.min(), f.extent()}}, [&]() {
-        Expr x = Variable::make(Int(32), "x");
+    LoopVar x("x", f.min(), f.extent());
+    s = ForAll(x, [&]() {
         return f(x) = x;
     });
     s = ProducerConsumer::make_produce(f.name(), s);
@@ -228,9 +268,9 @@ void provide_loop_multidim() {
     InOutBuffer f(out);
 
     Stmt s;
-    s = ForAll({"x", "y"}, {{f.min(0), f.extent(0)}, {f.min(1), f.extent(1)}}, [&]() {
-        Expr x = Variable::make(Int(32), "x");
-        Expr y = Variable::make(Int(32), "y");
+    LoopVar x("x", f.min(0), f.extent(0));
+    LoopVar y("y", f.min(1), f.extent(1));
+    s = ForAll({x, y}, [&]() {
         return f(x, y) = x + y;
     });
     s = ProducerConsumer::make_produce(f.name(), s);
@@ -252,9 +292,9 @@ void call_provide_loop_multidim() {
     InOutBuffer g(out);
 
     Stmt s;
-    s = ForAll({"x", "y"}, {{g.min(0), g.extent(0)}, {g.min(1), g.extent(1)}}, [&]() {
-        Expr x = Variable::make(Int(32), "x");
-        Expr y = Variable::make(Int(32), "y");
+    LoopVar x("x", g.min(0), g.extent(0));
+    LoopVar y("y", g.min(1), g.extent(1));
+    s = ForAll({x, y}, [&]() {
         return g(x, y) = 2 * f(x, y);
     });
     s = ProducerConsumer::make_produce(g.name(), s);
@@ -288,20 +328,18 @@ void in_place_bubble_sort() {
     //     }
     // }
     Stmt s;
-    s = ForAll({"j", "i"}, {{f.min() + 1, f.extent() - 1}, {f.min(), f.extent()}}, [&]() {
-        Expr i = Variable::make(Int(32), "i");
-        Expr j = Variable::make(Int(32), "j");
-        // if (f(j - 1) > f(j))
+    LoopVar j("j", f.min() + 1, f.extent() - 1);
+    LoopVar i("i", f.min(), f.extent());
+    s = ForAll({j, i}, [&]() {
         Stmt s = If(f(j - 1) > f(j), [&]() {
-            // _t = f(j - 1)
-            Stmt s = Store::make("_t", f(j - 1), 0, Parameter(), const_true(), ModulusRemainder());
-            // f(j - 1) = f(j)
-            s = Block::make(s, f(j - 1) = f(j));
-            // f(j) = _t
-            Expr _t = Load::make(Int(32), "_t", 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
-            s = Block::make(s, f(j) = _t);
-            // Allocate(_t)
-            s = Allocate::make("_t", Int(32), MemoryType::Register, {}, const_true(), s);
+            Stmt s = Int32([&](TempVar t) {
+                Stmt s = (t = f(j - 1));
+                // f(j - 1) = f(j)
+                s = Block::make(s, f(j - 1) = f(j));
+                // f(j) = _t
+                s = Block::make(s, f(j) = t);
+                return s;
+            });
             return s;
         });
         return s;
