@@ -333,12 +333,11 @@ void in_place_bubble_sort() {
     s = ForAll({j, i}, [&]() {
         Stmt s = If(f(j - 1) > f(j), [&]() {
             Stmt s = Int32([&](TempVar t) {
-                Stmt s = (t = f(j - 1));
-                // f(j - 1) = f(j)
-                s = Block::make(s, f(j - 1) = f(j));
-                // f(j) = _t
-                s = Block::make(s, f(j) = t);
-                return s;
+                return Block::make({
+                    t = f(j - 1),
+                    f(j - 1) = f(j),
+                    f(j) = t
+                });
             });
             return s;
         });
