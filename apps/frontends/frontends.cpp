@@ -92,6 +92,49 @@ Stmt If(Expr condition,
     Stmt s = f();
     return IfThenElse::make(condition, s);
 }
+
+struct InOutBufferRef;
+
+struct InOutBuffer {
+    InOutBuffer(const Buffer<> &b) : p(parameter(b)) {} 
+
+    InOutBufferRef operator()(const vector<Expr> &args = {}) const;
+    template<typename... Args>
+    InOutBufferRef operator()(Expr x, Args &&... args) const;
+
+    const string &name() const {
+        return p.name();
+    }
+
+    Parameter param() const {
+        return p;
+    }
+
+    Parameter p;
+};
+
+struct InOutBufferRef {
+    InOutBufferRef(const InOutBuffer &b, const vector<Expr> &args)
+        : b(b), args(args) {}
+
+    Stmt operator=(Expr value) {
+        return Provide::make(b.p.name(), {value}, args);
+    }
+
+    const InOutBuffer &b;
+    vector<Expr> args;
+};
+
+InOutBufferRef InOutBuffer::operator()(const vector<Expr> &args) const {
+    return InOutBufferRef(*this, args);
+}
+
+template<typename... Args>
+InOutBufferRef InOutBuffer::operator()(Expr x, Args &&... args) const {
+    vector<Expr> collected_args{x, std::forward<Args>(args)...};
+    return this->operator()(collected_args);
+}
+
 /////////////////////////////////////////////////////////
 
 /// Store 100 to a scalar function
@@ -131,16 +174,16 @@ void load_store_scalar() {
 void call_provide_scalar() {
     Buffer<int> in = Buffer<int>::make_scalar("f");
     Buffer<int> out = Buffer<int>::make_scalar("g");
-    Parameter f = parameter(in);
-    Parameter g = parameter(out);
+    InOutBuffer f(in);
+    InOutBuffer g(out);
 
     Stmt s;
     Expr e = Call::make(in, {});
     e = 2 * e; // multiply by 2
-    s = Provide::make(g.name(), {e}, {});
+    s = (g() = e);
     s = ProducerConsumer::make_produce(g.name(), s);
 
-    JITModule m = compile({in}, {out}, {g}, s);
+    JITModule m = compile({in}, {out}, {g.param()}, s);
     in() = 3;
     run(m, {in}, {out});
     _halide_user_assert(out() == 6);
@@ -149,18 +192,18 @@ void call_provide_scalar() {
 /// f(x) = x
 void provide_loop() {
     Buffer<int> out = Buffer<int>(16, "f");
-    Parameter f = parameter(out);
+    InOutBuffer f(out);
 
     Stmt s;
     Expr min = Variable::make(Int(32), out.name() + ".min.0");
     Expr extent = Variable::make(Int(32), out.name() + ".extent.0");
     s = ForAll({"x"}, {{min, extent}}, [&]() {
         Expr x = Variable::make(Int(32), "x");
-        return Provide::make(f.name(), {x}, {x});
+        return f(x) = x;
     });
     s = ProducerConsumer::make_produce(f.name(), s);
 
-    JITModule m = compile({}, {out}, {f}, s);
+    JITModule m = compile({}, {out}, {f.param()}, s);
     run(m, {}, {out});
     for (int i = 0; i < 16; i++) {
         _halide_user_assert(out(i) == i);
@@ -170,7 +213,7 @@ void provide_loop() {
 /// f(x, y) = x + y
 void provide_loop_multidim() {
     Buffer<int> out = Buffer<int>(16, 8, "f");
-    Parameter f = parameter(out);
+    InOutBuffer f(out);
 
     Stmt s;
     Expr x_min = Variable::make(Int(32), out.name() + ".min.0");
@@ -180,11 +223,11 @@ void provide_loop_multidim() {
     s = ForAll({"x", "y"}, {{x_min, x_extent}, {y_min, y_extent}}, [&]() {
         Expr x = Variable::make(Int(32), "x");
         Expr y = Variable::make(Int(32), "y");
-        return Provide::make(f.name(), {x + y}, {x, y});
+        return f(x, y) = x + y;
     });
     s = ProducerConsumer::make_produce(f.name(), s);
 
-    JITModule m = compile({}, {out}, {f}, s);
+    JITModule m = compile({}, {out}, {f.param()}, s);
     run(m, {}, {out});
     for (int i = 0; i < 16; i++) {
         for (int j = 0; j < 8; j++) {
@@ -197,8 +240,8 @@ void provide_loop_multidim() {
 void call_provide_loop_multidim() {
     Buffer<int> in = Buffer<int>(16, 8, "f");
     Buffer<int> out = Buffer<int>(16, 8, "g");
-    Parameter f = parameter(in);
-    Parameter g = parameter(out);
+    InOutBuffer f(in);
+    InOutBuffer g(out);
 
     Stmt s;
     Expr x_min = Variable::make(Int(32), out.name() + ".min.0");
@@ -209,7 +252,7 @@ void call_provide_loop_multidim() {
         Expr x = Variable::make(Int(32), "x");
         Expr y = Variable::make(Int(32), "y");
         Expr e = 2 * Call::make(in, {x, y});
-        return Provide::make(g.name(), {e}, {x, y});
+        return g(x, y) = e;
     });
     s = ProducerConsumer::make_produce(g.name(), s);
 
@@ -218,7 +261,7 @@ void call_provide_loop_multidim() {
             in(i, j) = i + j;
         }
     }
-    JITModule m = compile({in}, {out}, {g}, s);
+    JITModule m = compile({in}, {out}, {g.param()}, s);
     run(m, {in}, {out});
     for (int i = 0; i < 16; i++) {
         for (int j = 0; j < 8; j++) {
@@ -229,7 +272,7 @@ void call_provide_loop_multidim() {
 
 void in_place_bubble_sort() {
     Buffer<int> in_out = Buffer<int>(16, "f");
-    Parameter f = parameter(in_out);
+    InOutBuffer f(in_out);
 
     // for (int i = 0; i < size; i++) {
     //     for (int j = 1; j < size; j++) {
@@ -254,7 +297,7 @@ void in_place_bubble_sort() {
             // _t = f(j - 1)
             Stmt s = Store::make("_t", prev, 0, Parameter(), const_true(), ModulusRemainder());
             // f(j - 1) = f(j)
-            s = Block::make(s, Provide::make(f.name(), {curr}, {j - 1}));
+            s = Block::make(s, f(j - 1) = curr);
             // f(j) = _t
             Expr _t = Load::make(Int(32), "_t", 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
             s = Block::make(s, Provide::make(f.name(), {_t}, {j}));
@@ -269,7 +312,7 @@ void in_place_bubble_sort() {
     for (int i = 0; i < 16; i++) {
         in_out(i) = 15 - i;
     }
-    JITModule m = compile({in_out}, {in_out}, {f}, s);
+    JITModule m = compile({in_out}, {in_out}, {f.param()}, s);
     run(m, {in_out}, {in_out});
     for (int i = 0; i < 16; i++) {
         _halide_user_assert(in_out(i) == i);
