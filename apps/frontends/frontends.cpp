@@ -121,6 +121,14 @@ struct InOutBufferRef {
         return Provide::make(b.p.name(), {value}, args);
     }
 
+    Stmt operator=(const InOutBufferRef &b) {
+        return *this = Expr(b);
+    }
+
+    operator Expr() const {
+        return Call::make(b.p, args);
+    }
+
     const InOutBuffer &b;
     vector<Expr> args;
 };
@@ -178,9 +186,7 @@ void call_provide_scalar() {
     InOutBuffer g(out);
 
     Stmt s;
-    Expr e = Call::make(in, {});
-    e = 2 * e; // multiply by 2
-    s = (g() = e);
+    s = (g() = 2 * f());
     s = ProducerConsumer::make_produce(g.name(), s);
 
     JITModule m = compile({in}, {out}, {g.param()}, s);
@@ -251,8 +257,7 @@ void call_provide_loop_multidim() {
     s = ForAll({"x", "y"}, {{x_min, x_extent}, {y_min, y_extent}}, [&]() {
         Expr x = Variable::make(Int(32), "x");
         Expr y = Variable::make(Int(32), "y");
-        Expr e = 2 * Call::make(in, {x, y});
-        return g(x, y) = e;
+        return g(x, y) = 2 * f(x, y);
     });
     s = ProducerConsumer::make_produce(g.name(), s);
 
@@ -290,17 +295,15 @@ void in_place_bubble_sort() {
     s = ForAll({"j", "i"}, {{f_min + 1, f_extent - 1}, {f_min, f_extent}}, [&]() {
         Expr i = Variable::make(Int(32), "i");
         Expr j = Variable::make(Int(32), "j");
-        Expr prev = Call::make(in_out, {j - 1});
-        Expr curr = Call::make(in_out, {j});
         // if (f(j - 1) > f(j))
-        Stmt s = If(prev > curr, [&]() {
+        Stmt s = If(f(j - 1) > f(j), [&]() {
             // _t = f(j - 1)
-            Stmt s = Store::make("_t", prev, 0, Parameter(), const_true(), ModulusRemainder());
+            Stmt s = Store::make("_t", f(j - 1), 0, Parameter(), const_true(), ModulusRemainder());
             // f(j - 1) = f(j)
-            s = Block::make(s, f(j - 1) = curr);
+            s = Block::make(s, f(j - 1) = f(j));
             // f(j) = _t
             Expr _t = Load::make(Int(32), "_t", 0, Buffer<>(), Parameter(), const_true(), ModulusRemainder());
-            s = Block::make(s, Provide::make(f.name(), {_t}, {j}));
+            s = Block::make(s, f(j) = _t);
             // Allocate(_t)
             s = Allocate::make("_t", Int(32), MemoryType::Register, {}, const_true(), s);
             return s;
