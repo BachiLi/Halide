@@ -160,11 +160,46 @@ void provide_loop_multidim() {
     }
 }
 
+/// g(x, y) = 2 * f(x, y)
+void call_provide_loop_multidim() {
+    Buffer<int> in = Buffer<int>(16, 8, "f");
+    Buffer<int> out = Buffer<int>(16, 8, "g");
+    Parameter f = parameter(in);
+    Parameter g = parameter(out);
+
+    Stmt s;
+    Expr x = Variable::make(Int(32), "x");
+    Expr y = Variable::make(Int(32), "y");
+    Expr e = 2 * Call::make(in, {x, y});
+    s = Provide::make(g.name(), {e}, {x, y});
+    Expr x_min = Variable::make(Int(32), out.name() + ".min.0");
+    Expr x_extent = Variable::make(Int(32), out.name() + ".extent.0");
+    s = For::make("x", x_min, x_extent, ForType::Serial, DeviceAPI::Host, s);
+    Expr y_min = Variable::make(Int(32), out.name() + ".min.1");
+    Expr y_extent = Variable::make(Int(32), out.name() + ".extent.1");
+    s = For::make("y", y_min, y_extent, ForType::Serial, DeviceAPI::Host, s);
+    s = ProducerConsumer::make_produce(g.name(), s);
+
+    for (int i = 0; i < 16; i++) {
+        for (int j = 0; j < 8; j++) {
+            in(i, j) = i + j;
+        }
+    }
+    JITModule m = compile({in}, {out}, {g}, s);
+    run(m, {in}, {out});
+    for (int i = 0; i < 16; i++) {
+        for (int j = 0; j < 8; j++) {
+            _halide_user_assert(out(i, j) == in(i, j) * 2);
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
     call_provide_scalar();
     provide_loop();
     provide_loop_multidim();
+    call_provide_loop_multidim();
     return 0;
 }
