@@ -114,9 +114,30 @@ void call_provide_scalar() {
     _halide_user_assert(out() == 6);
 }
 
+/// f(x) = x
+void provide_loop() {
+    Buffer<int> out = Buffer<int>(16, "f");
+    Parameter f = parameter(out);
+
+    Stmt s;
+    Expr x = Variable::make(Int(32), "x");
+    s = Provide::make(f.name(), {x}, {x});
+    Expr min = Variable::make(Int(32), out.name() + ".min.0");
+    Expr extent = Variable::make(Int(32), out.name() + ".extent.0");
+    s = For::make("x", min, extent, ForType::Serial, DeviceAPI::Host, s);
+    s = ProducerConsumer::make_produce(f.name(), s);
+
+    JITModule m = compile({}, {out}, {f}, s);
+    run(m, {}, {out});
+    for (int i = 0; i < 16; i++) {
+        _halide_user_assert(out(i) == i);
+    }
+}
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
     call_provide_scalar();
+    provide_loop();
     return 0;
 }
