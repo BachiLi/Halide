@@ -81,27 +81,61 @@ struct LoopVar {
     Expr min, extent;
 };
 
+struct Vectorize {
+    Vectorize(Expr factor = 1) : factor(factor) {}
+    Expr factor;
+};
+
 Stmt ForAll(const vector<LoopVar> &vars,
             Stmt s,
-            ForType for_type = ForType::Serial,
-            DeviceAPI device_api = DeviceAPI::Host) {
+            Vectorize v = Vectorize(1)) {
+    int vectorize_factor = 1;
+    if (as_const_int(v.factor) != nullptr) {
+        vectorize_factor = *as_const_int(v.factor);
+    }
     // Build loop nest
+    bool first = true;
     for (LoopVar var : vars) {
-        s = For::make(var.name,
-                      var.min,
-                      var.extent,
-                      for_type,
-                      device_api,
-                      s);
+        if (first && vectorize_factor > 1) {
+            // Split the loop
+            // If guard
+            Expr outer = var;
+            const string &inner_name = unique_name('t');
+            Expr inner = Variable::make(outer.type(), inner_name);
+            Expr rebased = outer * v.factor + inner;
+            // Substitute variable var with rebased
+            s = substitute(var.name, rebased, s);
+
+            // GuardWithIf
+            s = IfThenElse::make(likely(rebased < var.min + var.extent), s);
+            s = For::make(inner_name,
+                          0,
+                          v.factor,
+                          ForType::Vectorized,
+                          DeviceAPI::Host,
+                          s);
+            s = For::make(var.name,
+                          var.min,
+                          var.extent / v.factor + 1,
+                          ForType::Serial,
+                          DeviceAPI::Host,
+                          s);
+        } else {
+            s = For::make(var.name,
+                          var.min,
+                          var.extent,
+                          ForType::Serial,
+                          DeviceAPI::Host,
+                          s);
+        }
     }
     return s;
 }
 
 Stmt ForAll(const LoopVar &var,
             Stmt s,
-            ForType for_type = ForType::Serial,
-            DeviceAPI device_api = DeviceAPI::Host) {
-    return ForAll(vector<LoopVar>{var}, s, for_type, device_api);
+            Vectorize v = Vectorize(1)) {
+    return ForAll(vector<LoopVar>{var}, s, v);
 }
 
 Stmt If(Expr condition,
@@ -349,6 +383,34 @@ void in_place_bubble_sort() {
     }
 }
 
+/// h(x) = f(x) + g(x)
+void add_vectorize() {
+    Buffer<int> in0(17, "f");
+    Buffer<int> in1(17, "g");
+    Buffer<int> out(17, "h");
+    InOutBuffer f(in0);
+    InOutBuffer g(in1);
+    InOutBuffer h(out);
+
+    Stmt s;
+    LoopVar x("x", h.min(), h.extent());
+    TempVar t(Int(32));
+    s = ForAll(x,
+        h(x) = f(x) + g(x),
+        Vectorize(8));
+    s = ProducerConsumer::make_produce(h.name(), s);
+
+    for (int i = 0; i < 17; i++) {
+        in0(i) = i;
+        in1(i) = 17 - i;
+    }
+    JITModule m = compile({in0, in1}, {out}, {h.param()}, s);
+    run(m, {in0, in1}, {out});
+    for (int i = 0; i < 17; i++) {
+        _halide_user_assert(out(i) == 17);
+    }
+}
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
@@ -357,5 +419,6 @@ int main(int argc, char *argv[]) {
     provide_loop_multidim();
     call_provide_loop_multidim();
     in_place_bubble_sort();
+    add_vectorize();
     return 0;
 }
