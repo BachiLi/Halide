@@ -832,6 +832,15 @@ struct Atomic : public StmtNode<Atomic> {
     static const IRNodeType _node_type = IRNodeType::Atomic;
 };
 
+/** Break the loop with loop_name */
+struct Break : public StmtNode<Break> {
+    std::string loop_name;
+
+    static Stmt make(const std::string &loop_name);
+
+    static const IRNodeType _node_type = IRNodeType::Break;
+};
+
 }  // namespace Internal
 }  // namespace Halide
 

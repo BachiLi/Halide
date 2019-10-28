@@ -403,6 +403,10 @@ Stmt IRMutator::visit(const Atomic *op) {
     }
 }
 
+Stmt IRMutator::visit(const Break *op) {
+    return op;
+}
+
 Stmt IRGraphMutator::mutate(const Stmt &s) {
     auto p = stmt_replacements.emplace(s, Stmt());
     if (p.second) {

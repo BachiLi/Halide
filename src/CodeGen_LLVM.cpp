@@ -3622,6 +3622,9 @@ void CodeGen_LLVM::visit(const For *op) {
         // Within the loop, the variable is equal to the phi value
         sym_push(op->name, phi);
 
+        // Also push after_bb for break
+        loop_after_bbs.push(op->name, after_bb);
+
         // Emit the loop body
         codegen(op->body);
 
@@ -3639,6 +3642,9 @@ void CodeGen_LLVM::visit(const For *op) {
 
         // Pop the loop variable from the scope
         sym_pop(op->name);
+
+        // Also pop after_bb
+        loop_after_bbs.pop(op->name);
     } else {
         internal_error << "Unknown type of For node. Only Serial and Parallel For nodes should survive down to codegen.\n";
     }
@@ -4302,6 +4308,11 @@ void CodeGen_LLVM::visit(const Atomic *op) {
         ScopedValue<bool> old_emit_atomic_stores(emit_atomic_stores, true);
         codegen(op->body);
     }
+}
+
+void CodeGen_LLVM::visit(const Break *op) {
+    BasicBlock *after_bb = loop_after_bbs.get(op->loop_name);
+    builder->CreateBr(after_bb);
 }
 
 Value *CodeGen_LLVM::create_alloca_at_entry(llvm::Type *t, int n, bool zero_initialize, const string &name) {

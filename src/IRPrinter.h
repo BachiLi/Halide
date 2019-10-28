@@ -173,6 +173,7 @@ protected:
     void visit(const Shuffle *) override;
     void visit(const Prefetch *) override;
     void visit(const Atomic *) override;
+    void visit(const Break *) override;
 };
 
 }  // namespace Internal

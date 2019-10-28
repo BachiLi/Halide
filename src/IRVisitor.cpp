@@ -260,6 +260,9 @@ void IRVisitor::visit(const Atomic *op) {
     op->body.accept(this);
 }
 
+void IRVisitor::visit(const Break *op) {
+}
+
 void IRGraphVisitor::include(const Expr &e) {
     auto r = visited.insert(e.get());
     if (r.second) {
@@ -508,6 +511,9 @@ void IRGraphVisitor::visit(const Shuffle *op) {
 
 void IRGraphVisitor::visit(const Atomic *op) {
     include(op->body);
+}
+
+void IRGraphVisitor::visit(const Break *op) {
 }
 
 }  // namespace Internal

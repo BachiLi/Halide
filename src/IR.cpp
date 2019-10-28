@@ -821,6 +821,12 @@ Stmt Atomic::make(const std::string &producer_name,
     return node;
 }
 
+Stmt Break::make(const std::string &loop_name) {
+    Break *node = new Break;
+    node->loop_name = loop_name;
+    return node;
+}
+
 namespace {
 
 // Helper function to determine if a sequence of indices is a
@@ -1042,6 +1048,10 @@ template<>
 void StmtNode<Atomic>::accept(IRVisitor *v) const {
     v->visit((const Atomic *)this);
 }
+template<>
+void StmtNode<Break>::accept(IRVisitor *v) const {
+    v->visit((const Break *)this);
+}
 
 template<>
 Expr ExprNode<IntImm>::mutate_expr(IRMutator *v) const {
@@ -1223,6 +1233,10 @@ Stmt StmtNode<Fork>::mutate_stmt(IRMutator *v) const {
 template<>
 Stmt StmtNode<Atomic>::mutate_stmt(IRMutator *v) const {
     return v->visit((const Atomic *)this);
+}
+template<>
+Stmt StmtNode<Break>::mutate_stmt(IRMutator *v) const {
+    return v->visit((const Break *)this);
 }
 
 Call::ConstString Call::buffer_get_dimensions = "_halide_buffer_get_dimensions";

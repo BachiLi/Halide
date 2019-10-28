@@ -400,6 +400,7 @@ protected:
     void visit(const Shuffle *) override;
     void visit(const Prefetch *) override;
     void visit(const Atomic *) override;
+    void visit(const Break *) override;
     // @}
 
     /** Generate code for an allocate node. It has no default
@@ -506,6 +507,9 @@ private:
     /** All the values in scope at the current code location during
      * codegen. Use sym_push and sym_pop to access. */
     Scope<llvm::Value *> symbol_table;
+
+    /** Labels for jumping out of loops. Used by Break. */
+    Scope<llvm::BasicBlock *> loop_after_bbs;
 
     /** String constants already emitted to the module. Tracked to
      * prevent emitting the same string many times. */

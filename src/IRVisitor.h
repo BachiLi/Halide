@@ -77,6 +77,7 @@ protected:
     virtual void visit(const Fork *);
     virtual void visit(const Acquire *);
     virtual void visit(const Atomic *);
+    virtual void visit(const Break *);
 };
 
 /** A base class for algorithms that walk recursively over the IR
@@ -146,6 +147,7 @@ protected:
     void visit(const Acquire *) override;
     void visit(const Fork *) override;
     void visit(const Atomic *) override;
+    void visit(const Break *) override;
     // @}
 };
 
@@ -238,6 +240,7 @@ private:
         case IRNodeType::Evaluate:
         case IRNodeType::Prefetch:
         case IRNodeType::Atomic:
+        case IRNodeType::Break:
             internal_error << "Unreachable";
         }
         return ExprRet{};
@@ -310,6 +313,8 @@ private:
             return ((T *)this)->visit((const Prefetch *)node, std::forward<Args>(args)...);
         case IRNodeType::Atomic:
             return ((T *)this)->visit((const Atomic *)node, std::forward<Args>(args)...);
+        case IRNodeType::Break:
+            return ((T *)this)->visit((const Break *)node, std::forward<Args>(args)...);
         }
         return StmtRet{};
     }

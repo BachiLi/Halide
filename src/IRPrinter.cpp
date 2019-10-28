@@ -945,5 +945,9 @@ void IRPrinter::visit(const Atomic *op) {
     stream << get_indent() << "}\n";
 }
 
+void IRPrinter::visit(const Break *op) {
+    stream << get_indent() << "break (" << op->loop_name << ");\n";
+}
+
 }  // namespace Internal
 }  // namespace Halide

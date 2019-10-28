@@ -514,5 +514,13 @@ Stmt Simplify::visit(const Atomic *op) {
     }
 }
 
+Stmt Simplify::visit(const Break *op) {
+    if (op->loop_name.empty()) {
+        return Evaluate::make(0);
+    } else {
+        return op;
+    }
+}
+
 }  // namespace Internal
 }  // namespace Halide
