@@ -431,7 +431,6 @@ void add_vectorize() {
 
     Stmt s;
     LoopVar x("x", h.min(), h.extent());
-    TempVar t(Int(32));
     s = ForAll(x,
         h(x) = f(x) + g(x),
         Vectorize(8));
@@ -459,7 +458,6 @@ void add_parallelize_vectorize() {
 
     Stmt s;
     LoopVar x("x", h.min(), h.extent());
-    TempVar t(Int(32));
     s = ForAll(x,
         h(x) = f(x) + g(x),
         Vectorize(8),
@@ -477,6 +475,33 @@ void add_parallelize_vectorize() {
     }
 }
 
+// void mandelbrot() {
+//     Buffer<int> out(512, 512, "h");
+//     InOutBuffer f(out);
+
+//     Stmt s;
+//     LoopVar x("x", f.min(0), f.extent(0));
+//     LoopVar y("y", f.min(1), f.extent(1));
+//     LoopVar i("i", 0, 512);
+//     TempVar z_re(Float(32)), z_im(Float(32)), count(Int(32));
+//     s = ForAll({x, y}, Block::make({
+//             z_re = cast<float>(x),
+//             z_im = cast<float>(y),
+//             ForAll(i, Block::make({
+//                 If(z_re * z_re + z_im * z_im > 4.f, Block::make({
+//                     count = i,
+//                     Break::make()
+//                 })), Block::make({
+//                     z_re = cast<float>(x) + z_re * z_re - z_im * z_im,
+//                     z_im = cast<float>(y) + 2 * z_re * z_im
+//                 })
+//             }))
+//         }),
+//         Vectorize(8),
+//         Parallelize(8));
+//     s = ProducerConsumer::make_produce(h.name(), s);    
+// }
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
@@ -487,5 +512,6 @@ int main(int argc, char *argv[]) {
     in_place_bubble_sort();
     add_vectorize();
     add_parallelize_vectorize();
+    // mandelbrot();
     return 0;
 }
