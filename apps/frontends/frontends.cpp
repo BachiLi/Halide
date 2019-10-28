@@ -86,47 +86,83 @@ struct Vectorize {
     Expr factor;
 };
 
+struct Parallelize {
+    Parallelize(Expr num_tasks = 1) : num_tasks(num_tasks) {}
+    Expr num_tasks;
+};
+
+Stmt Split_(Stmt s,
+            Expr size,
+            bool size_is_inner,
+            ForType outer_for_type,
+            ForType inner_for_type) {
+    const For *for_stmt = s.as<For>();
+    user_assert(for_stmt) << "Can only split statement with an outer loop.";
+    const string &loop_var_name = for_stmt->name;
+    Stmt s_ = for_stmt->body;
+
+    Expr inner_size, outer_size;
+    if (size_is_inner) {
+        inner_size = size;
+        outer_size = select(for_stmt->extent % inner_size != 0,
+                            for_stmt->extent / inner_size + 1,
+                            for_stmt->extent / inner_size);
+    } else {
+        outer_size = size;
+        inner_size = select(for_stmt->extent % outer_size != 0,
+                            for_stmt->extent / outer_size + 1,
+                            for_stmt->extent / outer_size);
+    }
+
+    Expr loop_var = Variable::make(Int(32), loop_var_name);
+    Expr outer = loop_var;
+    const string &inner_name = unique_name('v');
+    Expr inner = Variable::make(outer.type(), inner_name);
+    Expr rebased = outer * inner_size + inner;
+    // Substitute variable var with rebased
+    s_ = substitute(loop_var_name, rebased, s_);
+    if (!can_prove(for_stmt->extent % size == 0)) {
+        // GuardWithIf
+        s_ = IfThenElse::make(
+            likely(rebased < for_stmt->min + for_stmt->extent), s_);
+    }
+    s_ = For::make(inner_name,
+                   0,
+                   inner_size,
+                   inner_for_type,
+                   DeviceAPI::Host,
+                   s_);
+    s_ = For::make(loop_var_name,
+                   for_stmt->min,
+                   outer_size,
+                   outer_for_type,
+                   DeviceAPI::Host,
+                   s_);
+    return s_;
+}
+
 Stmt ForAll(const vector<LoopVar> &vars,
             Stmt s,
-            Vectorize v = Vectorize(1)) {
+            Vectorize v = Vectorize(1),
+            Parallelize p = Parallelize(1)) {
     int vectorize_factor = 1;
     if (as_const_int(v.factor) != nullptr) {
         vectorize_factor = *as_const_int(v.factor);
     }
     // Build loop nest
-    bool first = true;
-    for (LoopVar var : vars) {
-        if (first && vectorize_factor > 1) {
-            // Split the loop
-            // If guard
-            Expr outer = var;
-            const string &inner_name = unique_name('t');
-            Expr inner = Variable::make(outer.type(), inner_name);
-            Expr rebased = outer * v.factor + inner;
-            // Substitute variable var with rebased
-            s = substitute(var.name, rebased, s);
-
-            // GuardWithIf
-            s = IfThenElse::make(likely(rebased < var.min + var.extent), s);
-            s = For::make(inner_name,
-                          0,
-                          v.factor,
-                          ForType::Vectorized,
-                          DeviceAPI::Host,
-                          s);
-            s = For::make(var.name,
-                          var.min,
-                          var.extent / v.factor + 1,
-                          ForType::Serial,
-                          DeviceAPI::Host,
-                          s);
-        } else {
-            s = For::make(var.name,
-                          var.min,
-                          var.extent,
-                          ForType::Serial,
-                          DeviceAPI::Host,
-                          s);
+    for (int var_id = 0; var_id < (int)vars.size(); var_id++) {
+        const LoopVar &var = vars[var_id];
+        s = For::make(var.name,
+                      var.min,
+                      var.extent,
+                      ForType::Serial,
+                      DeviceAPI::Host,
+                      s);
+        if (var_id == 0 && vectorize_factor > 1) {
+            s = Split_(s, v.factor, true, ForType::Serial, ForType::Vectorized);
+        }
+        if (var_id == (int)vars.size() - 1 && !is_const(p.num_tasks, 1)) {
+            s = Split_(s, p.num_tasks, false, ForType::Parallel, ForType::Serial);
         }
     }
     return s;
@@ -134,8 +170,9 @@ Stmt ForAll(const vector<LoopVar> &vars,
 
 Stmt ForAll(const LoopVar &var,
             Stmt s,
-            Vectorize v = Vectorize(1)) {
-    return ForAll(vector<LoopVar>{var}, s, v);
+            Vectorize v = Vectorize(1),
+            Parallelize p = Parallelize(1)) {
+    return ForAll(vector<LoopVar>{var}, s, v, p);
 }
 
 Stmt If(Expr condition,
@@ -411,6 +448,35 @@ void add_vectorize() {
     }
 }
 
+/// h(x) = f(x) + g(x)
+void add_parallelize_vectorize() {
+    Buffer<int> in0(129, "f");
+    Buffer<int> in1(129, "g");
+    Buffer<int> out(129, "h");
+    InOutBuffer f(in0);
+    InOutBuffer g(in1);
+    InOutBuffer h(out);
+
+    Stmt s;
+    LoopVar x("x", h.min(), h.extent());
+    TempVar t(Int(32));
+    s = ForAll(x,
+        h(x) = f(x) + g(x),
+        Vectorize(8),
+        Parallelize(8));
+    s = ProducerConsumer::make_produce(h.name(), s);
+
+    for (int i = 0; i < 129; i++) {
+        in0(i) = i;
+        in1(i) = 129 - i;
+    }
+    JITModule m = compile({in0, in1}, {out}, {h.param()}, s);
+    run(m, {in0, in1}, {out});
+    for (int i = 0; i < 129; i++) {
+        _halide_user_assert(out(i) == 129);
+    }
+}
+
 int main(int argc, char *argv[]) {
     store_to_scalar();
     load_store_scalar();
@@ -420,5 +486,6 @@ int main(int argc, char *argv[]) {
     call_provide_loop_multidim();
     in_place_bubble_sort();
     add_vectorize();
+    add_parallelize_vectorize();
     return 0;
 }
