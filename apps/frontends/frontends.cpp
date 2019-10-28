@@ -475,6 +475,32 @@ void add_parallelize_vectorize() {
     }
 }
 
+/// f(x) = 0
+/// f(x) = x if x < 10
+void test_break() {
+    Buffer<int> out(15, "h");
+    InOutBuffer f(out);
+
+    Stmt s;
+    LoopVar x("x", f.min(), f.extent());
+    s = ForAll(x, f(x) = 0);
+    s = Block::make({s,
+        ForAll(x, Block::make({
+        If(x >= 10, Break::make(x.name)),
+        f(x) = x,
+    }))});
+    s = ProducerConsumer::make_produce(f.name(), s);
+
+    JITModule m = compile({}, {out}, {f.param()}, s);
+    run(m, {}, {out});
+    for (int i = 0; i < 10; i++) {
+        _halide_user_assert(out(i) == i);
+    }
+    for (int i = 11; i < 15; i++) {
+        _halide_user_assert(out(i) == 0);
+    }
+}
+
 // void mandelbrot() {
 //     Buffer<int> out(512, 512, "h");
 //     InOutBuffer f(out);
@@ -503,15 +529,16 @@ void add_parallelize_vectorize() {
 // }
 
 int main(int argc, char *argv[]) {
-    store_to_scalar();
-    load_store_scalar();
-    call_provide_scalar();
-    provide_loop();
-    provide_loop_multidim();
-    call_provide_loop_multidim();
-    in_place_bubble_sort();
-    add_vectorize();
-    add_parallelize_vectorize();
+    // store_to_scalar();
+    // load_store_scalar();
+    // call_provide_scalar();
+    // provide_loop();
+    // provide_loop_multidim();
+    // call_provide_loop_multidim();
+    // in_place_bubble_sort();
+    // add_vectorize();
+    // add_parallelize_vectorize();
+    test_break();
     // mandelbrot();
     return 0;
 }

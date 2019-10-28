@@ -4250,14 +4250,20 @@ void CodeGen_LLVM::visit(const IfThenElse *op) {
     builder->CreateCondBr(codegen(op->condition), true_bb, false_bb);
 
     builder->SetInsertPoint(true_bb);
+    unterminated_branches.insert(true_bb);
     codegen(op->then_case);
-    builder->CreateBr(after_bb);
+    if (unterminated_branches.find(true_bb) != unterminated_branches.end()) {
+        builder->CreateBr(after_bb);
+    }
 
     builder->SetInsertPoint(false_bb);
+    unterminated_branches.insert(false_bb);
     if (op->else_case.defined()) {
         codegen(op->else_case);
     }
-    builder->CreateBr(after_bb);
+    if (unterminated_branches.find(false_bb) != unterminated_branches.end()) {
+        builder->CreateBr(after_bb);
+    }
 
     builder->SetInsertPoint(after_bb);
 }
@@ -4311,8 +4317,15 @@ void CodeGen_LLVM::visit(const Atomic *op) {
 }
 
 void CodeGen_LLVM::visit(const Break *op) {
+    // // Get the Phi node
+    // PHINode *phi = dyn_cast<PHINode>(sym_get(op->loop_name));
+    // internal_assert(phi != nullptr);
+    // phi->addIncoming(phi, builder->GetInsertBlock());
+
+    // Create branch
     BasicBlock *after_bb = loop_after_bbs.get(op->loop_name);
     builder->CreateBr(after_bb);
+    unterminated_branches.erase(builder->GetInsertBlock());
 }
 
 Value *CodeGen_LLVM::create_alloca_at_entry(llvm::Type *t, int n, bool zero_initialize, const string &name) {
