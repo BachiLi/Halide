@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 #include "CodeGen_D3D12Compute_Dev.h"
 #include "CodeGen_Internal.h"
@@ -65,7 +66,9 @@ string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_type_maybe_storag
         case 8:
         case 16:
         case 32:
-            if (type.is_uint()) oss << 'u';
+            if (type.is_uint()) {
+                oss << "u";
+            }
             oss << "int";
 #if DEBUG_TYPES
             oss << type.bits();
@@ -101,7 +104,7 @@ string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_type_maybe_storag
     }
 
     if (space == AppendSpace) {
-        oss << ' ';
+        oss << " ";
     }
 
     return oss.str();
@@ -115,7 +118,7 @@ string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_storage_type(Type
     return print_type_maybe_storage(type, true, DoNotAppendSpace);
 }
 
-string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinterpret(Type type, Expr e) {
+string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinterpret(Type type, const Expr &e) {
     return print_reinterpret_cast(type, print_expr(e));
 }
 
@@ -263,7 +266,7 @@ void CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::visit(const Call *op) {
 namespace {
 
 // If e is a ramp expression with stride 1, return the base, otherwise undefined.
-Expr is_ramp_one(Expr e) {
+Expr is_ramp_one(const Expr &e) {
     const Ramp *r = e.as<Ramp>();
     if (r == nullptr) {
         return Expr();
@@ -590,7 +593,7 @@ void CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::visit(const Allocate *op)
             << "Only fixed-size allocations are supported on the gpu. "
             << "Try storing into shared memory instead.";
 
-        stream << get_indent() << print_storage_type(op->type) << ' '
+        stream << get_indent() << print_storage_type(op->type) << " "
                << print_name(op->name) << "[" << size << "];\n";
         stream << get_indent();
 
@@ -623,13 +626,13 @@ string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_assignment(Type t
     return CodeGen_C::print_assignment(type, rhs_modified);
 }
 
-string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_vanilla_cast(Type type, string value_expr) {
+string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_vanilla_cast(Type type, const string &value_expr) {
     ostringstream ss;
     ss << print_type(type) << "(" << value_expr << ")";
     return ss.str();
 }
 
-string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinforced_cast(Type type, string value_expr) {
+string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinforced_cast(Type type, const string &value_expr) {
     if (type.is_float()) {
         return print_vanilla_cast(type, value_expr);
     }
@@ -657,7 +660,7 @@ string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinforced_cast(T
     return rsr.str();
 }
 
-string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinterpret_cast(Type type, string value_expr) {
+string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinterpret_cast(Type type, const string &value_expr) {
     type = type.element_of();
 
     string cast_expr;
@@ -682,7 +685,7 @@ string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_reinterpret_cast(
     return cast_expr;
 }
 
-string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_cast(Type target_type, Type source_type, string value_expr) {
+string CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::print_cast(Type target_type, Type source_type, const string &value_expr) {
     // casting to or from a float type? just use the language cast:
     if (target_type.is_float() || source_type.is_float()) {
         return print_vanilla_cast(target_type, value_expr);
@@ -789,7 +792,7 @@ struct BufferSize {
         : size(0) {
     }
     BufferSize(string name, size_t size)
-        : name(name), size(size) {
+        : name(std::move(name)), size(size) {
     }
 
     bool operator<(const BufferSize &r) const {
@@ -819,7 +822,7 @@ void CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::add_kernel(Stmt s,
     };
     for (auto &arg : args) {
         if (isConstantBuffer(arg)) {
-            constants.push_back(BufferSize(arg.name, arg.size));
+            constants.emplace_back(arg.name, arg.size);
         }
     }
 
@@ -896,7 +899,7 @@ void CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::add_kernel(Stmt s,
     struct FindUninitializedSharedLoads : public IRMutator {
         using IRMutator::mutate;
         using IRMutator::visit;
-        virtual Expr visit(const Load *op) override {
+        Expr visit(const Load *op) override {
             if (op->name == "__shared") {
                 if (!latest_store) {
                     // attempting to read from __shared before anything has been
@@ -906,14 +909,14 @@ void CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::add_kernel(Stmt s,
             }
             return IRMutator::visit(op);
         }
-        virtual Stmt visit(const Store *op) override {
+        Stmt visit(const Store *op) override {
             Stmt store = IRMutator::visit(op);
             if (op->name == "__shared") {
                 latest_store = op;
             }
             return store;
         }
-        virtual Stmt mutate(const Stmt &stmt) override {
+        Stmt mutate(const Stmt &stmt) override {
             if (!bad_load_expr) {
                 current_stmt = &stmt;
             }
@@ -930,7 +933,7 @@ void CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::add_kernel(Stmt s,
         // use IRMutator to inject a zero-initialization before the load
         struct ZeroInitializeSharedMemory : public IRMutator {
             using IRMutator::mutate;
-            virtual Stmt mutate(const Stmt &op) override {
+            Stmt mutate(const Stmt &op) override {
                 if (&op != uninitialized_load_stmt) {
                     return IRMutator::mutate(op);
                 }
@@ -1003,11 +1006,13 @@ void CodeGen_D3D12Compute_Dev::CodeGen_D3D12Compute_C::add_kernel(Stmt s,
     // Emit the kernel function prototype:
 
     stream << "void " << name << "(\n";
-    stream << ' ' << "uint3 tgroup_index  : SV_GroupID,\n"
-           << ' ' << "uint3 tid_in_tgroup : SV_GroupThreadID";
+    stream << " "
+           << "uint3 tgroup_index  : SV_GroupID,\n"
+           << " "
+           << "uint3 tid_in_tgroup : SV_GroupThreadID";
     for (auto &arg : args) {
         stream << ",\n";
-        stream << ' ';
+        stream << " ";
         if (arg.is_buffer) {
             // NOTE(marcos): Passing all buffers as RWBuffers in order to bind
             // all buffers as UAVs since there is no way the runtime can know
@@ -1127,7 +1132,7 @@ void CodeGen_D3D12Compute_Dev::init_module() {
         << "\n";
     //<< "}\n"; // close namespace
 
-    src_stream << '\n';
+    src_stream << "\n";
 
     d3d12compute_c.add_common_macros(src_stream);
 
@@ -1148,7 +1153,7 @@ string CodeGen_D3D12Compute_Dev::get_current_kernel_name() {
 }
 
 void CodeGen_D3D12Compute_Dev::dump() {
-    std::cerr << src_stream.str() << std::endl;
+    std::cerr << src_stream.str() << "\n";
 }
 
 std::string CodeGen_D3D12Compute_Dev::print_gpu_name(const std::string &name) {

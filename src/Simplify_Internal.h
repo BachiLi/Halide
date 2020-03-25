@@ -90,9 +90,11 @@ public:
         }
     };
 
-#if LOG_EXPR_MUTATIONS
+#if (LOG_EXPR_MUTATORIONS || LOG_STMT_MUTATIONS)
     static int debug_indent;
+#endif
 
+#if LOG_EXPR_MUTATIONS
     Expr mutate(const Expr &e, ExprInfo *b) {
         const std::string spaces(debug_indent, ' ');
         debug(1) << spaces << "Simplifying Expr: " << e << "\n";
@@ -185,6 +187,11 @@ public:
     IRMatcher::WildConst<2> c2;
     IRMatcher::WildConst<3> c3;
 
+    // Tracks whether or not we're inside a vector loop. Certain
+    // transformations are not a good idea if the code is to be
+    // vectorized.
+    bool in_vector_loop = false;
+
     // If we encounter a reference to a buffer (a Load, Store, Call,
     // or Provide), there's an implicit dependence on some associated
     // symbols.
@@ -256,10 +263,10 @@ public:
     template<typename T>
     Expr hoist_slice_vector(Expr e);
 
-    Stmt mutate_let_body(Stmt s, ExprInfo *) {
+    Stmt mutate_let_body(const Stmt &s, ExprInfo *) {
         return mutate(s);
     }
-    Expr mutate_let_body(Expr e, ExprInfo *bounds) {
+    Expr mutate_let_body(const Expr &e, ExprInfo *bounds) {
         return mutate(e, bounds);
     }
 

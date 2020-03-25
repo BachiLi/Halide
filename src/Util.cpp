@@ -28,9 +28,11 @@
 #define NOMINMAX
 #endif
 #ifdef _WIN32
-#include <windows.h>
 #include <Objbase.h>  // needed for CoCreateGuid
 #include <Shlobj.h>   // needed for SHGetFolderPath
+#include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 #ifdef __APPLE__
 #define CAN_GET_RUNNING_PROGRAM_NAME
@@ -393,7 +395,7 @@ std::string dir_make_temp() {
             break;
         }
     }
-    internal_assert(false) << "Unable to create temp directory in " << tmp_dir << "\n";
+    internal_error << "Unable to create temp directory in " << tmp_dir << "\n";
     return "";
 #else
     std::string templ = "/tmp/XXXXXX";
@@ -494,12 +496,12 @@ std::string c_print_name(const std::string &name) {
 
     // Prefix an underscore to avoid reserved words (e.g. a variable named "while")
     if (isalpha(name[0])) {
-        oss << '_';
+        oss << "_";
     }
 
     for (size_t i = 0; i < name.size(); i++) {
         if (name[i] == '.') {
-            oss << '_';
+            oss << "_";
         } else if (name[i] == '$') {
             oss << "__";
         } else if (name[i] != '_' && !isalnum(name[i])) {
@@ -512,4 +514,47 @@ std::string c_print_name(const std::string &name) {
 }
 
 }  // namespace Internal
+
+void load_plugin(const std::string &lib_name) {
+#ifdef _WIN32
+    std::string lib_path = lib_name;
+    if (lib_path.find('.') == std::string::npos) {
+        lib_path += ".dll";
+    }
+
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, lib_path.c_str(), -1, nullptr, 0);
+    if (wide_len < 1) {
+        user_error << "Failed to load: " << lib_path << " (unconvertible character)\n";
+    }
+
+    std::vector<wchar_t> wide_lib(wide_len);
+    wide_len = MultiByteToWideChar(CP_UTF8, 0, lib_path.c_str(), -1, wide_lib.data(), wide_len);
+    if (wide_len < 1) {
+        user_error << "Failed to load: " << lib_path << " (unconvertible character)\n";
+    }
+
+    if (!LoadLibraryW(wide_lib.data())) {
+        DWORD last_err = GetLastError();
+        LPVOID last_err_msg;
+        FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                           FORMAT_MESSAGE_IGNORE_INSERTS,
+                       nullptr, last_err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                       reinterpret_cast<LPSTR>(&last_err_msg), 0, nullptr);
+        std::string err_msg(static_cast<char *>(last_err_msg));
+        LocalFree(last_err_msg);
+        user_error << "Failed to load: " << lib_path << ";\n"
+                   << "LoadLibraryW failed with error " << last_err << ": "
+                   << err_msg << "\n";
+    }
+#else
+    std::string lib_path = lib_name;
+    if (lib_path.find('.') == std::string::npos) {
+        lib_path = "lib" + lib_path + ".so";
+    }
+    if (dlopen(lib_path.c_str(), RTLD_LAZY) == nullptr) {
+        user_error << "Failed to load: " << lib_path << ": " << dlerror() << "\n";
+    }
+#endif
+}
+
 }  // namespace Halide

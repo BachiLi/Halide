@@ -68,7 +68,6 @@
 #include "VaryingAttributes.h"
 #include "VectorizeLoops.h"
 #include "WrapCalls.h"
-#include "WrapExternStages.h"
 
 namespace Halide {
 namespace Internal {
@@ -131,13 +130,13 @@ Module lower(const vector<Function> &output_funcs,
     bool any_memoized = false;
     Stmt s = schedule_functions(outputs, fused_groups, env, t, any_memoized);
     debug(2) << "Lowering after creating initial loop nests:\n"
-             << s << '\n';
+             << s << "\n";
 
     if (any_memoized) {
         debug(1) << "Injecting memoization...\n";
         s = inject_memoization(s, env, pipeline_name, outputs);
         debug(2) << "Lowering after injecting memoization:\n"
-                 << s << '\n';
+                 << s << "\n";
     } else {
         debug(1) << "Skipping injecting memoization...\n";
     }
@@ -145,24 +144,31 @@ Module lower(const vector<Function> &output_funcs,
     debug(1) << "Injecting tracing...\n";
     s = inject_tracing(s, pipeline_name, trace_pipeline, env, outputs, t);
     debug(2) << "Lowering after injecting tracing:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Adding checks for parameters\n";
     s = add_parameter_checks(requirements, s, t);
     debug(2) << "Lowering after injecting parameter checks:\n"
-             << s << '\n';
+             << s << "\n";
 
     // Compute the maximum and minimum possible value of each
     // function. Used in later bounds inference passes.
     debug(1) << "Computing bounds of each function's value\n";
     FuncValueBounds func_bounds = compute_function_value_bounds(order, env);
 
+    bool will_inject_host_copies =
+        (t.has_gpu_feature() ||
+         t.has_feature(Target::OpenGLCompute) ||
+         t.has_feature(Target::OpenGL) ||
+         t.has_feature(Target::HexagonDma) ||
+         (t.arch != Target::Hexagon && (t.features_any_of({Target::HVX_64, Target::HVX_128}))));
+
     // The checks will be in terms of the symbols defined by bounds
     // inference.
     debug(1) << "Adding checks for images\n";
-    s = add_image_checks(s, outputs, t, order, env, func_bounds);
+    s = add_image_checks(s, outputs, t, order, env, func_bounds, will_inject_host_copies);
     debug(2) << "Lowering after injecting image checks:\n"
-             << s << '\n';
+             << s << "\n";
 
     // This pass injects nested definitions of variable names, so we
     // can't simplify statements from here until we fix them up. (We
@@ -170,27 +176,27 @@ Module lower(const vector<Function> &output_funcs,
     debug(1) << "Performing computation bounds inference...\n";
     s = bounds_inference(s, outputs, order, fused_groups, env, func_bounds, t);
     debug(2) << "Lowering after computation bounds inference:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Removing extern loops...\n";
     s = remove_extern_loops(s);
     debug(2) << "Lowering after removing extern loops:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Performing sliding window optimization...\n";
     s = sliding_window(s, env);
     debug(2) << "Lowering after sliding window:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Simplifying correlated differences...\n";
     s = simplify_correlated_differences(s);
     debug(2) << "Lowering after simplifying correlated differences:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Performing allocation bounds inference...\n";
     s = allocation_bounds_inference(s, env, func_bounds);
     debug(2) << "Lowering after allocation bounds inference:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Removing code that depends on undef values...\n";
     s = remove_undef(s);
@@ -213,16 +219,21 @@ Module lower(const vector<Function> &output_funcs,
     debug(1) << "Performing storage folding optimization...\n";
     s = storage_folding(s, env);
     debug(2) << "Lowering after storage folding:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Injecting debug_to_file calls...\n";
     s = debug_to_file(s, outputs, env);
     debug(2) << "Lowering after injecting debug_to_file calls:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Injecting prefetches...\n";
     s = inject_prefetch(s, env);
     debug(2) << "Lowering after injecting prefetches:\n"
+             << s << "\n\n";
+
+    debug(1) << "Discarding safe promises...\n";
+    s = lower_safe_promises(s);
+    debug(2) << "Lowering after discarding safe promises:\n"
              << s << "\n\n";
 
     debug(1) << "Dynamically skipping stages...\n";
@@ -233,7 +244,7 @@ Module lower(const vector<Function> &output_funcs,
     debug(1) << "Forking asynchronous producers...\n";
     s = fork_async_producers(s, env);
     debug(2) << "Lowering after forking asynchronous producers:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Destructuring tuple-valued realizations...\n";
     s = split_tuples(s, env);
@@ -248,7 +259,7 @@ Module lower(const vector<Function> &output_funcs,
         debug(1) << "Canonicalizing GPU var names...\n";
         s = canonicalize_gpu_vars(s);
         debug(2) << "Lowering after canonicalizing GPU var names:\n"
-                 << s << '\n';
+                 << s << "\n";
     }
 
     debug(1) << "Performing storage flattening...\n";
@@ -275,11 +286,7 @@ Module lower(const vector<Function> &output_funcs,
         debug(1) << "Skipping rewriting memoized allocations...\n";
     }
 
-    if (t.has_gpu_feature() ||
-        t.has_feature(Target::OpenGLCompute) ||
-        t.has_feature(Target::OpenGL) ||
-        t.has_feature(Target::HexagonDma) ||
-        (t.arch != Target::Hexagon && (t.features_any_of({Target::HVX_64, Target::HVX_128})))) {
+    if (will_inject_host_copies) {
         debug(1) << "Selecting a GPU API for GPU loops...\n";
         s = select_gpu_api(s, t);
         debug(2) << "Lowering after selecting a GPU API:\n"
@@ -317,7 +324,7 @@ Module lower(const vector<Function> &output_funcs,
     debug(1) << "Simplifying correlated differences...\n";
     s = simplify_correlated_differences(s);
     debug(2) << "Lowering after simplifying correlated differences:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Unrolling...\n";
     s = unroll_loops(s);
@@ -371,7 +378,7 @@ Module lower(const vector<Function> &output_funcs,
     debug(1) << "Simplifying correlated differences...\n";
     s = simplify_correlated_differences(s);
     debug(2) << "Lowering after simplifying correlated differences:\n"
-             << s << '\n';
+             << s << "\n";
 
     debug(1) << "Bounding small allocations...\n";
     s = bound_small_allocations(s);
@@ -422,7 +429,7 @@ Module lower(const vector<Function> &output_funcs,
         debug(1) << "Splitting off Hexagon offload...\n";
         s = inject_hexagon_rpc(s, t, result_module);
         debug(2) << "Lowering after splitting off Hexagon offload:\n"
-                 << s << '\n';
+                 << s << "\n";
     } else {
         debug(1) << "Skipping Hexagon offload...\n";
     }
@@ -439,9 +446,9 @@ Module lower(const vector<Function> &output_funcs,
     vector<Argument> public_args = args;
     for (const auto &out : outputs) {
         for (Parameter buf : out.output_buffers()) {
-            public_args.push_back(Argument(buf.name(),
-                                           Argument::OutputBuffer,
-                                           buf.type(), buf.dimensions(), buf.get_argument_estimates()));
+            public_args.emplace_back(buf.name(),
+                                     Argument::OutputBuffer,
+                                     buf.type(), buf.dimensions(), buf.get_argument_estimates());
         }
     }
 
@@ -518,13 +525,6 @@ Module lower(const vector<Function> &output_funcs,
     }
 
     result_module.append(main_func);
-
-    // Append a wrapper for this pipeline that accepts old buffer_ts
-    // and upgrades them. It will use the same name, so it will
-    // require C++ linkage. We don't need it when jitting.
-    if (!t.has_feature(Target::JIT)) {
-        add_legacy_wrapper(result_module, main_func);
-    }
 
     return result_module;
 }

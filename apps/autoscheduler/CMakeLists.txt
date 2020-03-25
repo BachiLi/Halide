@@ -5,7 +5,7 @@ set(WF_CPP ${BASENAME_WF}.cpp)
 
 add_custom_command(OUTPUT ${WF_CPP}
                    DEPENDS ${WF} binary2cpp
-                   COMMAND binary2cpp ${BASENAME_WF}_weights < ${WF} > ${WF_CPP}
+                   COMMAND $<TARGET_FILE:binary2cpp> ${BASENAME_WF}_weights < ${WF} > ${WF_CPP}
                    COMMENT "${WF} -> ${WF_CPP}"
                    VERBATIM)
 
@@ -36,17 +36,20 @@ set_target_properties(retrain_cost_model_process
 target_include_directories(retrain_cost_model_process
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../support)
 target_link_libraries(retrain_cost_model_process
-                      PRIVATE cost_model train_cost_model)
+                      PRIVATE cost_model train_cost_model Halide)
 
 # =======================================================
 
 # libauto_schedule
+# Note: must use MODULE here (not SHARED) to get .so (instead of .dylib) on OSX.
+# This means that this can only be opened dynamically (not linked directly), but that's ok.
 add_library(auto_schedule
-            SHARED
+            MODULE
             ASLog.cpp
             AutoSchedule.cpp
             DefaultCostModel.cpp
             FunctionDAG.cpp
+            LoopNest.cpp
             Weights.cpp
             ${WF_CPP})
 
@@ -66,9 +69,9 @@ endif()
 
 if(NOT HALIDE_ENABLE_RTTI)
   if(NOT MSVC)
-    target_compile_options(auto_schedule PUBLIC "-fno-rtti")
+    target_compile_options(auto_schedule PRIVATE "-fno-rtti")
   else()
-    target_compile_options(auto_schedule PUBLIC "/GR-")
+    target_compile_options(auto_schedule PRIVATE "/GR-")
   endif()
 endif()
 
@@ -80,7 +83,7 @@ install(TARGETS auto_schedule LIBRARY DESTINATION bin)
 halide_library(demo
                SRCS demo_generator.cpp
                FUNCTION_NAME demo
-               GENERATOR_ARGS auto_schedule=true -p $<TARGET_FILE:auto_schedule>)
+               GENERATOR_ARGS auto_schedule=true -p $<TARGET_FILE:auto_schedule> -s Adams2019)
 add_dependencies(demo auto_schedule)
 
 _halide_genfiles_dir(demo GENFILES_DIR)
@@ -91,12 +94,12 @@ add_executable(demo_apps_autoscheduler ${HALIDE_TOOLS_DIR}/RunGenMain.cpp
 target_include_directories(
   demo_apps_autoscheduler
   PRIVATE "${HALIDE_INCLUDE_DIR}" "${HALIDE_TOOLS_DIR}")
-halide_use_image_io(demo_apps_autoscheduler)
+target_link_libraries(demo_apps_autoscheduler PRIVATE Halide::ImageIO)
 target_link_libraries(demo_apps_autoscheduler PRIVATE demo)
 add_dependencies(demo_apps_autoscheduler demo auto_schedule)
 
 add_custom_command(TARGET demo_apps_autoscheduler POST_BUILD
-                   COMMAND demo_apps_autoscheduler
+                   COMMAND $<TARGET_FILE:demo_apps_autoscheduler>
                            --benchmarks=all
                            --benchmark_min_time=1
                            --estimate_all
@@ -108,7 +111,7 @@ add_custom_command(TARGET demo_apps_autoscheduler POST_BUILD
 halide_library(included_schedule_file
                SRCS included_schedule_file_generator.cpp
                FUNCTION_NAME included_schedule_file
-               GENERATOR_ARGS auto_schedule=true -p $<TARGET_FILE:auto_schedule>)
+               GENERATOR_ARGS auto_schedule=true -p $<TARGET_FILE:auto_schedule> -s Adams2019)
 add_dependencies(included_schedule_file auto_schedule)
 
 _halide_genfiles_dir(included_schedule_file GENFILES_DIR)
@@ -120,14 +123,12 @@ add_executable(demo_included_schedule_file ${HALIDE_TOOLS_DIR}/RunGenMain.cpp
 target_include_directories(
   demo_included_schedule_file
   PRIVATE "${HALIDE_INCLUDE_DIR}" "${HALIDE_TOOLS_DIR}")
-halide_use_image_io(demo_included_schedule_file)
-target_link_libraries(demo_included_schedule_file
-                      PRIVATE included_schedule_file)
+target_link_libraries(demo_included_schedule_file PRIVATE Halide::ImageIO included_schedule_file)
 add_dependencies(demo_included_schedule_file included_schedule_file
                  auto_schedule)
 
 add_custom_command(TARGET demo_included_schedule_file POST_BUILD
-                   COMMAND demo_included_schedule_file
+                   COMMAND $<TARGET_FILE:demo_included_schedule_file>
                            --benchmarks=all
                            --benchmark_min_time=1
                            --estimate_all
@@ -151,6 +152,12 @@ if (NOT WIN32)
 endif()
 
 add_executable(test_perfect_hash_map test_perfect_hash_map.cpp)
+
+add_executable(test_function_dag test_function_dag.cpp FunctionDAG.cpp ASLog.cpp)
+target_include_directories(
+  test_function_dag
+  PRIVATE "${HALIDE_INCLUDE_DIR}" "${HALIDE_TOOLS_DIR}")
+target_link_libraries(test_function_dag PRIVATE Halide)
 
 add_executable(weightsdir_to_weightsfile weightsdir_to_weightsfile.cpp
                Weights.cpp)

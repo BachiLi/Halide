@@ -2,6 +2,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "CSE.h"
@@ -35,17 +36,17 @@ public:
     }
 };
 
-vector<string> gather_variables(const Expr &expr,
-                                const vector<string> &filter) {
+vector<int> gather_variables(const Expr &expr,
+                             const vector<string> &filter) {
 
     class GatherVariables : public IRGraphVisitor {
     public:
         using IRGraphVisitor::visit;
 
         void visit(const Variable *op) override {
-            for (const auto &pv : filter) {
-                if (op->name == pv) {
-                    variables.push_back(op->name);
+            for (int i = 0; i < (int)filter.size(); i++) {
+                if (op->name == filter[i]) {
+                    variable_ids.push_back(i);
                 }
             }
         }
@@ -54,17 +55,16 @@ vector<string> gather_variables(const Expr &expr,
             : filter(f) {
         }
 
-        vector<string> variables;
+        vector<int> variable_ids;
         const vector<string> &filter;
     } gatherer(filter);
 
     expr.accept(&gatherer);
-
-    return gatherer.variables;
+    return gatherer.variable_ids;
 }
 
-vector<string> gather_variables(const Expr &expr,
-                                const vector<Var> &filter) {
+vector<int> gather_variables(const Expr &expr,
+                             const vector<Var> &filter) {
     vector<string> str_filter;
     str_filter.reserve(filter.size());
     for (const auto &var : filter) {
@@ -73,7 +73,7 @@ vector<string> gather_variables(const Expr &expr,
     return gather_variables(expr, str_filter);
 }
 
-map<string, ReductionVariableInfo> gather_rvariables(Tuple tuple) {
+map<string, ReductionVariableInfo> gather_rvariables(const Tuple &tuple) {
 
     class GatherRVars : public IRGraphVisitor {
     public:
@@ -104,7 +104,7 @@ map<string, ReductionVariableInfo> gather_rvariables(Tuple tuple) {
     return gatherer.rvar_map;
 }
 
-map<string, ReductionVariableInfo> gather_rvariables(Expr expr) {
+map<string, ReductionVariableInfo> gather_rvariables(const Expr &expr) {
     return gather_rvariables(Tuple(expr));
 }
 
@@ -217,6 +217,7 @@ map<string, Box> inference_bounds(const vector<Func> &funcs,
         map<string, Function> local_env = find_transitive_calls(func);
         env.insert(local_env.begin(), local_env.end());
     }
+
     // Reduction variable scopes
     Scope<Interval> scope;
     for (const auto &it : env) {
@@ -263,6 +264,10 @@ map<string, Box> inference_bounds(const vector<Func> &funcs,
                     boxes_required(expr, scope, func_value_bounds);
                 // Loop over the dependencies
                 for (const auto &it : update_bounds) {
+                    if (it.first == func.name()) {
+                        // Skip self reference
+                        continue;
+                    }
                     // Update the bounds, if not exists then create a new one
                     auto found = bounds.find(it.first);
                     if (found == bounds.end()) {
@@ -298,7 +303,7 @@ vector<pair<Expr, Expr>> box_to_vector(const Box &bounds) {
     vector<pair<Expr, Expr>> ret;
     ret.reserve(bounds.size());
     for (const auto &b : bounds.bounds) {
-        ret.push_back({b.min, b.max - b.min + 1});
+        ret.emplace_back(b.min, b.max - b.min + 1);
     }
     return ret;
 }
@@ -432,7 +437,7 @@ map<string, BufferInfo> find_buffer_param_calls(const Func &func) {
 struct ImplicitVariablesFinder : public IRGraphVisitor {
 public:
     using IRGraphVisitor::visit;
-    set<string> find(Expr expr) {
+    set<string> find(const Expr &expr) {
         implicit_variables.clear();
         expr.accept(this);
         return implicit_variables;
@@ -448,7 +453,7 @@ public:
     set<string> implicit_variables;
 };
 
-set<string> find_implicit_variables(Expr expr) {
+set<string> find_implicit_variables(const Expr &expr) {
     ImplicitVariablesFinder finder;
     return finder.find(expr);
 }
@@ -531,6 +536,32 @@ bool is_calling_function(
     const map<string, Expr> &let_var_mapping) {
     FunctionCallFinder finder;
     return finder.find(expr, let_var_mapping);
+}
+
+struct SubstituteCallArgWithPureArg : public IRMutator {
+public:
+    SubstituteCallArgWithPureArg(Func f, int variable_id)
+        : f(std::move(f)), variable_id(variable_id) {
+    }
+
+protected:
+    using IRMutator::visit;
+    Expr visit(const Call *op) override {
+        if (op->name == f.name()) {
+            vector<Expr> args = op->args;
+            args[variable_id] = f.args()[variable_id];
+            return Call::make(op->type, op->name, args, op->call_type, op->func, op->value_index, op->image, op->param);
+        } else {
+            return IRMutator::visit(op);
+        }
+    }
+
+    Func f;
+    int variable_id;
+};
+
+Expr substitute_call_arg_with_pure_arg(Func f, int variable_id, const Expr &e) {
+    return simplify(SubstituteCallArgWithPureArg(std::move(f), variable_id).mutate(e));
 }
 
 }  // namespace Internal

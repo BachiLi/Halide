@@ -2,8 +2,10 @@
 #include <memory>
 #include <set>
 #include <stdlib.h>
+#include <utility>
 
 #include "CSE.h"
+#include "Func.h"
 #include "Function.h"
 #include "IR.h"
 #include "IREquality.h"
@@ -324,7 +326,7 @@ ExternFuncArgument deep_copy_extern_func_argument_helper(
     return copy;
 }
 
-void Function::deep_copy(FunctionPtr copy, DeepCopyMap &copied_map) const {
+void Function::deep_copy(const FunctionPtr &copy, DeepCopyMap &copied_map) const {
     internal_assert(copy.defined() && contents.defined())
         << "Cannot deep-copy undefined Function\n";
 
@@ -372,9 +374,9 @@ void Function::deep_copy(FunctionPtr copy, DeepCopyMap &copied_map) const {
     }
 }
 
-void Function::deep_copy(string name, FunctionPtr copy, DeepCopyMap &copied_map) const {
+void Function::deep_copy(string name, const FunctionPtr &copy, DeepCopyMap &copied_map) const {
     deep_copy(copy, copied_map);
-    copy->name = name;
+    copy->name = std::move(name);
 }
 
 void Function::define(const vector<string> &args, vector<Expr> values) {
@@ -395,14 +397,14 @@ void Function::define(const vector<string> &args, vector<Expr> values) {
     // attached to some parameter
     CheckVars check(name());
     check.pure_args = args;
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i].accept(&check);
+    for (const auto &value : values) {
+        value.accept(&check);
     }
 
     // Freeze all called functions
     FreezeFunctions freezer(name());
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i].accept(&freezer);
+    for (const auto &value : values) {
+        value.accept(&freezer);
     }
 
     // Make sure all the vars in the args have unique non-empty names
@@ -420,14 +422,19 @@ void Function::define(const vector<string> &args, vector<Expr> values) {
         }
     }
 
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i] = common_subexpression_elimination(values[i]);
+    for (auto &value : values) {
+        value = common_subexpression_elimination(value);
     }
 
     // Tag calls to random() with the free vars
     int tag = rand_counter++;
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i] = lower_random(values[i], args, tag);
+    vector<VarOrRVar> free_vars;
+    free_vars.reserve(args.size());
+    for (const auto &arg : args) {
+        free_vars.emplace_back(Var(arg));
+    }
+    for (auto &value : values) {
+        value = lower_random(value, free_vars, tag);
     }
 
     user_assert(!check.reduction_domain.defined())
@@ -567,11 +574,11 @@ void Function::define_update(const vector<Expr> &_args, vector<Expr> values) {
     // vars in the LHS in the correct places.
     CheckVars check(name());
     check.pure_args = pure_args;
-    for (size_t i = 0; i < args.size(); i++) {
-        args[i].accept(&check);
+    for (const auto &arg : args) {
+        arg.accept(&check);
     }
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i].accept(&check);
+    for (const auto &value : values) {
+        value.accept(&check);
     }
     if (check.reduction_domain.defined()) {
         check.unbound_reduction_vars_ok = true;
@@ -580,11 +587,11 @@ void Function::define_update(const vector<Expr> &_args, vector<Expr> values) {
 
     // Freeze all called functions
     FreezeFunctions freezer(name());
-    for (size_t i = 0; i < args.size(); i++) {
-        args[i].accept(&freezer);
+    for (const auto &arg : args) {
+        arg.accept(&freezer);
     }
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i].accept(&freezer);
+    for (const auto &value : values) {
+        value.accept(&freezer);
     }
 
     // Freeze the reduction domain if defined
@@ -594,24 +601,28 @@ void Function::define_update(const vector<Expr> &_args, vector<Expr> values) {
     }
 
     // Tag calls to random() with the free vars
-    vector<string> free_vars;
-    for (size_t i = 0; i < pure_args.size(); i++) {
-        if (!pure_args[i].empty()) {
-            free_vars.push_back(pure_args[i]);
+    vector<VarOrRVar> free_vars;
+    int num_free_vars = (int)pure_args.size();
+    if (check.reduction_domain.defined()) {
+        num_free_vars += (int)check.reduction_domain.domain().size();
+    }
+    free_vars.reserve(num_free_vars);
+    for (const auto &pure_arg : pure_args) {
+        if (!pure_arg.empty()) {
+            free_vars.emplace_back(Var(pure_arg));
         }
     }
     if (check.reduction_domain.defined()) {
         for (size_t i = 0; i < check.reduction_domain.domain().size(); i++) {
-            string rvar = check.reduction_domain.domain()[i].var;
-            free_vars.push_back(rvar);
+            free_vars.emplace_back(RVar(check.reduction_domain, i));
         }
     }
     int tag = rand_counter++;
-    for (size_t i = 0; i < args.size(); i++) {
-        args[i] = lower_random(args[i], free_vars, tag);
+    for (auto &arg : args) {
+        arg = lower_random(arg, free_vars, tag);
     }
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i] = lower_random(values[i], free_vars, tag);
+    for (auto &value : values) {
+        value = lower_random(value, free_vars, tag);
     }
     if (check.reduction_domain.defined()) {
         check.reduction_domain.set_predicate(lower_random(check.reduction_domain.predicate(), free_vars, tag));
@@ -621,11 +632,11 @@ void Function::define_update(const vector<Expr> &_args, vector<Expr> values) {
     // function itself, introducing circular references and hence
     // memory leaks. We need to break these cycles.
     WeakenFunctionPtrs weakener(contents.get());
-    for (size_t i = 0; i < args.size(); i++) {
-        args[i] = weakener.mutate(args[i]);
+    for (auto &arg : args) {
+        arg = weakener.mutate(arg);
     }
-    for (size_t i = 0; i < values.size(); i++) {
-        values[i] = weakener.mutate(values[i]);
+    for (auto &value : values) {
+        value = weakener.mutate(value);
     }
     if (check.reduction_domain.defined()) {
         check.reduction_domain.set_predicate(
@@ -653,9 +664,9 @@ void Function::define_update(const vector<Expr> &_args, vector<Expr> values) {
     }
 
     // Then add the pure args outside of that
-    for (size_t i = 0; i < pure_args.size(); i++) {
-        if (!pure_args[i].empty()) {
-            Dim d = {pure_args[i], ForType::Serial, DeviceAPI::None, Dim::Type::PureVar};
+    for (const auto &pure_arg : pure_args) {
+        if (!pure_arg.empty()) {
+            Dim d = {pure_arg, ForType::Serial, DeviceAPI::None, Dim::Type::PureVar};
             r.schedule().dims().push_back(d);
         }
     }
@@ -686,7 +697,7 @@ void Function::define_update(const vector<Expr> &_args, vector<Expr> values) {
 void Function::define_extern(const std::string &function_name,
                              const std::vector<ExternFuncArgument> &extern_args,
                              const std::vector<Type> &types,
-                             const std::vector<string> &args,
+                             const std::vector<Var> &args,
                              NameMangling mangling,
                              DeviceAPI device_api) {
 
@@ -698,7 +709,13 @@ void Function::define_extern(const std::string &function_name,
         << "In extern definition for Func \"" << name() << "\":\n"
         << "Func already has an extern definition.\n";
 
-    contents->args = args;
+    std::vector<string> arg_names;
+    std::vector<Expr> arg_exprs;
+    for (size_t i = 0; i < args.size(); i++) {
+        arg_names.push_back(args[i].name());
+        arg_exprs.push_back(args[i]);
+    }
+    contents->args = arg_names;
     contents->extern_function_name = function_name;
     contents->extern_arguments = extern_args;
     contents->output_types = types;
@@ -718,20 +735,15 @@ void Function::define_extern(const std::string &function_name,
         values.push_back(undef(types[i]));
     }
 
-    std::vector<Expr> arg_exprs;
-    for (size_t i = 0; i < args.size(); i++) {
-        arg_exprs.push_back(args[i]);
-    }
-
     contents->init_def = Definition(arg_exprs, values, ReductionDomain(), true);
 
     // Reset the storage dims to match the pure args
     contents->func_schedule.storage_dims().clear();
     contents->init_def.schedule().dims().clear();
     for (size_t i = 0; i < args.size(); i++) {
-        contents->func_schedule.storage_dims().push_back(StorageDim{args[i]});
+        contents->func_schedule.storage_dims().push_back(StorageDim{arg_names[i]});
         contents->init_def.schedule().dims().push_back(
-            Dim{args[i], ForType::Extern, DeviceAPI::None, Dim::Type::PureVar});
+            Dim{arg_names[i], ForType::Extern, DeviceAPI::None, Dim::Type::PureVar});
     }
     // Add the dummy outermost dim
     contents->init_def.schedule().dims().push_back(
@@ -1000,7 +1012,7 @@ namespace {
 class SubstituteCalls : public IRMutator {
     using IRMutator::visit;
 
-    map<FunctionPtr, FunctionPtr> substitutions;
+    const map<FunctionPtr, FunctionPtr> &substitutions;
 
     Expr visit(const Call *c) override {
         Expr expr = IRMutator::visit(c);
@@ -1010,8 +1022,10 @@ class SubstituteCalls : public IRMutator {
         if ((c->call_type == Call::Halide) &&
             c->func.defined() &&
             substitutions.count(c->func)) {
-            FunctionPtr subs = substitutions[c->func];
-            internal_assert(subs.defined()) << "Function not in environment: " << subs->name << "\n";
+            auto it = substitutions.find(c->func);
+            internal_assert(it != substitutions.end())
+                << "Function not in environment: " << c->func->name << "\n";
+            FunctionPtr subs = it->second;
             debug(4) << "...Replace call to Func \"" << c->name << "\" with "
                      << "\"" << subs->name << "\"\n";
             expr = Call::make(c->type, subs->name, c->args, c->call_type,
@@ -1088,7 +1102,7 @@ pair<vector<Function>, map<string, Function>> deep_copy(
         if (iter != copied_map.end()) {
             FunctionPtr ptr = iter->second;
             debug(4) << "Adding deep-copied version to outputs: " << func.name() << "\n";
-            copy_outputs.push_back(Function(ptr));
+            copy_outputs.emplace_back(ptr);
         } else {
             debug(4) << "Adding original version to outputs: " << func.name() << "\n";
             copy_outputs.push_back(func);

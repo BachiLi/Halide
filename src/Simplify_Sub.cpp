@@ -36,14 +36,13 @@ Expr Simplify::visit(const Sub *op, ExprInfo *bounds) {
         const int lanes = op->type.lanes();
 
         if (rewrite(c0 - c1, fold(c0 - c1)) ||
-            rewrite(IRMatcher::Indeterminate() - x, a) ||
-            rewrite(x - IRMatcher::Indeterminate(), b) ||
             rewrite(IRMatcher::Overflow() - x, a) ||
             rewrite(x - IRMatcher::Overflow(), b) ||
             rewrite(x - 0, x)) {
             return rewrite.result;
         }
 
+        // clang-format off
         if (EVAL_IN_LAMBDA
             ((!op->type.is_uint() && rewrite(x - c0, x + fold(-c0), !overflows(-c0))) ||
              rewrite(x - x, 0) || // We want to remutate this just to get better bounds
@@ -51,6 +50,8 @@ Expr Simplify::visit(const Sub *op, ExprInfo *bounds) {
              rewrite(ramp(x, y) - broadcast(z), ramp(x - z, y, lanes)) ||
              rewrite(broadcast(x) - ramp(z, w), ramp(x - z, -w, lanes)) ||
              rewrite(broadcast(x) - broadcast(y), broadcast(x - y, lanes)) ||
+             rewrite((x - broadcast(y)) - broadcast(z), x - broadcast(y + z, lanes)) ||
+             rewrite((x + broadcast(y)) - broadcast(z), x + broadcast(y - z, lanes)) ||
              rewrite(select(x, y, z) - select(x, w, u), select(x, y - w, z - u)) ||
              rewrite(select(x, y, z) - y, select(x, 0, z - y)) ||
              rewrite(select(x, y, z) - z, select(x, y - z, 0)) ||
@@ -274,9 +275,10 @@ Expr Simplify::visit(const Sub *op, ExprInfo *bounds) {
                rewrite((x + y)/c0 - x/c0, ((x % c0) + y)/c0, c0 > 0) ||
                rewrite(x/c0 - (x - y)/c0, ((y + fold(c0 - 1)) - (x % c0))/c0, c0 > 0) ||
                rewrite((x - y)/c0 - x/c0, ((x % c0) - y)/c0, c0 > 0))))) {
-            return mutate(std::move(rewrite.result), bounds);
+            return mutate(rewrite.result, bounds);
         }
     }
+    // clang-format on
 
     const Shuffle *shuffle_a = a.as<Shuffle>();
     const Shuffle *shuffle_b = b.as<Shuffle>();

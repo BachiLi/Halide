@@ -77,12 +77,12 @@ struct PreviousDeclarations {
         return check_and_enter(prev_types, mangled.full_name, mangled.with_substitutions);
     }
 
-    std::string check_and_enter_name(std::string name) {
+    std::string check_and_enter_name(const std::string &name) {
         return check_and_enter(prev_names, name, name + "@");
     }
 };
 
-std::string simple_type_to_mangle_char(const std::string type_name, const Target &target) {
+std::string simple_type_to_mangle_char(const std::string &type_name, const Target &target) {
     if (type_name == "void") {
         return "X";
     } else if (type_name == "bool") {
@@ -317,13 +317,13 @@ std::string cplusplus_function_mangled_name(const std::string &name, const std::
 
 namespace ItaniumABIMangling {
 
-std::string itanium_mangle_id(std::string id) {
+std::string itanium_mangle_id(const std::string &id) {
     std::ostringstream oss;
     oss << id.size() << id;
     return oss.str();
 }
 
-std::string simple_type_to_mangle_char(const std::string type_name, const Target &target) {
+std::string simple_type_to_mangle_char(const std::string &type_name, const Target &target) {
     if (type_name == "void") {
         return "v";
     } else if (type_name == "bool") {
@@ -345,16 +345,16 @@ std::string simple_type_to_mangle_char(const std::string type_name, const Target
         return "j";
     } else if (type_name == "int64_t") {
         if (target.os == Target::OSX ||
-            target.bits == 32 ||
-            target.has_feature(Target::MinGW)) {
+            target.os == Target::IOS ||
+            target.bits == 32) {
             return "x";
         } else {
             return "l";
         }
     } else if (type_name == "uint64_t") {
         if (target.os == Target::OSX ||
-            target.bits == 32 ||
-            target.has_feature(Target::MinGW)) {
+            target.os == Target::IOS ||
+            target.bits == 32) {
             return "y";
         } else {
             return "m";
@@ -398,7 +398,7 @@ struct PrevPrefixes {
         return !place.second;
     }
 
-    bool extend_name_part(MangledNamePart &name_part, const std::string mangled) {
+    bool extend_name_part(MangledNamePart &name_part, const std::string &mangled) {
         std::string substitute;
         bool found = check_and_enter(name_part.with_substitutions + mangled, substitute);
         if (found) {
@@ -410,7 +410,7 @@ struct PrevPrefixes {
         return found;
     }
 
-    bool prepend_name_part(const std::string mangled, MangledNamePart &name_part) {
+    bool prepend_name_part(const std::string &mangled, MangledNamePart &name_part) {
         std::string substitute;
         bool found = check_and_enter(mangled + name_part.with_substitutions, substitute);
         if (found) {
@@ -465,7 +465,7 @@ MangledNamePart apply_indirection_and_cvr_quals(const Type &type, MangledNamePar
     return name_part;
 }
 
-MangledNamePart mangle_qualified_name(std::string name, const std::vector<std::string> &namespaces,
+MangledNamePart mangle_qualified_name(const std::string &name, const std::vector<std::string> &namespaces,
                                       const std::vector<halide_cplusplus_type_name> &enclosing_types,
                                       bool can_substitute, PrevPrefixes &prevs) {
     MangledNamePart result;
@@ -534,8 +534,8 @@ std::string mangle_type(const Type &type, const Target &target, PrevPrefixes &pr
             return "i";
         case 64:
             if (target.os == Target::OSX ||
-                target.bits == 32 ||
-                target.has_feature(Target::MinGW)) {
+                target.os == Target::IOS ||
+                target.bits == 32) {
                 return "x";
             } else {
                 return "l";
@@ -555,8 +555,8 @@ std::string mangle_type(const Type &type, const Target &target, PrevPrefixes &pr
             return "j";
         case 64:
             if (target.os == Target::OSX ||
-                target.bits == 32 ||
-                target.has_feature(Target::MinGW)) {
+                target.os == Target::IOS ||
+                target.bits == 32) {
                 return "y";
             } else {
                 return "m";
@@ -604,7 +604,7 @@ std::string cplusplus_function_mangled_name(const std::string &name, const std::
 std::string cplusplus_function_mangled_name(const std::string &name, const std::vector<std::string> &namespaces,
                                             Type return_type, const std::vector<ExternFuncArgument> &args,
                                             const Target &target) {
-    if (target.os == Target::Windows && !target.has_feature(Target::MinGW)) {
+    if (target.os == Target::Windows) {
         return WindowsMangling::cplusplus_function_mangled_name(name, namespaces, return_type, args, target);
     } else {
         return ItaniumABIMangling::cplusplus_function_mangled_name(name, namespaces, return_type, args, target);
@@ -614,6 +614,8 @@ std::string cplusplus_function_mangled_name(const std::string &name, const std::
 // All code below is for tests.
 
 namespace {
+
+constexpr int kTestTargetCount = 8;
 
 struct MangleResult {
     const char *expected;
@@ -680,9 +682,11 @@ MangleResult win64_expecteds[] = {
     {"\001?test_function@test_namespace@1@YAHPEAVtest_enum@1@@Z", "test_namespace::test_namespace::test_function(test_namespace::test_enum*)"},
 };
 
-MangleResult all_types_by_target[] = {
+MangleResult all_types_by_target[kTestTargetCount] = {
     {"_Z13test_functionbahstijxyfd", "test_function(bool, signed char, unsigned char, short, unsigned short, int, unsigned int, long long, unsigned long long, float, double)"},
     {"_Z13test_functionbahstijlmfd", "test_function(bool, signed char, unsigned char, short, unsigned short, int, unsigned int, long, unsigned long, float, double)"},
+    {"_Z13test_functionbahstijxyfd", "test_function(bool, signed char, unsigned char, short, unsigned short, int, unsigned int, long long, unsigned long long, float, double)"},
+    {"_Z13test_functionbahstijxyfd", "test_function(bool, signed char, unsigned char, short, unsigned short, int, unsigned int, long, unsigned long, float, double)"},
     {"_Z13test_functionbahstijxyfd", "test_function(bool, signed char, unsigned char, short, unsigned short, int, unsigned int, long long, unsigned long long, float, double)"},
     {"_Z13test_functionbahstijxyfd", "test_function(bool, signed char, unsigned char, short, unsigned short, int, unsigned int, long, unsigned long, float, double)"},
     {"\001?test_function@@YAH_NCEFGHI_J_KMN@Z", "test_function(bool, signed char, unsigned char, short, unsigned short, int, unsigned int, long long, unsigned long long, float, double)"},
@@ -695,11 +699,13 @@ const char *many_type_subs_win32 = "\001?test_function@@YAHPAUs0@test_namespace@
 
 const char *many_type_subs_win64 = "\001?test_function@@YAHPEAUs0@test_namespace@@PEAUs1@2@PEAUs2@2@PEAUs3@2@PEAUs4@2@PEAUs5@2@PEAUs6@2@PEAUs7@2@PEAUs8@2@PEAUs9@2@PEAUs10@2@PEAUs11@2@PEAUs12@2@PEAUs13@2@PEAUs14@2@PEAUs15@2@PEAUs16@2@PEAUs17@2@PEAUs18@2@PEAUs19@2@PEAUs20@2@PEAUs21@2@PEAUs22@2@PEAUs23@2@PEAUs24@2@PEAUs25@2@PEAUs26@2@PEAUs27@2@PEAUs28@2@PEAUs29@2@PEAUs30@2@PEAUs31@2@PEAUs32@2@PEAUs33@2@PEAUs34@2@PEAUs35@2@PEAUs36@2@PEAUs37@2@PEAUs38@2@PEAUs39@2@PEAUs40@2@PEAUs41@2@PEAUs42@2@PEAUs43@2@PEAUs44@2@PEAUs45@2@PEAUs46@2@PEAUs47@2@PEAUs48@2@PEAUs49@2@PEAUs50@2@PEAUs51@2@PEAUs52@2@PEAUs53@2@PEAUs54@2@PEAUs55@2@PEAUs56@2@PEAUs57@2@PEAUs58@2@PEAUs59@2@PEAUs60@2@PEAUs61@2@PEAUs62@2@PEAUs63@2@PEAUs64@2@PEAUs65@2@PEAUs66@2@PEAUs67@2@PEAUs68@2@PEAUs69@2@PEAUs70@2@PEAUs71@2@PEAUs72@2@PEAUs73@2@PEAUs74@2@PEAUs75@2@PEAUs76@2@PEAUs77@2@PEAUs78@2@PEAUs79@2@PEAUs80@2@PEAUs81@2@PEAUs82@2@PEAUs83@2@PEAUs84@2@PEAUs85@2@PEAUs86@2@PEAUs87@2@PEAUs88@2@PEAUs89@2@PEAUs90@2@PEAUs91@2@PEAUs92@2@PEAUs93@2@PEAUs94@2@PEAUs95@2@PEAUs96@2@PEAUs97@2@PEAUs98@2@PEAUs99@2@0123456789PEAUs10@2@PEAUs11@2@PEAUs12@2@PEAUs13@2@PEAUs14@2@PEAUs15@2@PEAUs16@2@PEAUs17@2@PEAUs18@2@PEAUs19@2@PEAUs20@2@PEAUs21@2@PEAUs22@2@PEAUs23@2@PEAUs24@2@PEAUs25@2@PEAUs26@2@PEAUs27@2@PEAUs28@2@PEAUs29@2@PEAUs30@2@PEAUs31@2@PEAUs32@2@PEAUs33@2@PEAUs34@2@PEAUs35@2@PEAUs36@2@PEAUs37@2@PEAUs38@2@PEAUs39@2@PEAUs40@2@PEAUs41@2@PEAUs42@2@PEAUs43@2@PEAUs44@2@PEAUs45@2@PEAUs46@2@PEAUs47@2@PEAUs48@2@PEAUs49@2@PEAUs50@2@PEAUs51@2@PEAUs52@2@PEAUs53@2@PEAUs54@2@PEAUs55@2@PEAUs56@2@PEAUs57@2@PEAUs58@2@PEAUs59@2@PEAUs60@2@PEAUs61@2@PEAUs62@2@PEAUs63@2@PEAUs64@2@PEAUs65@2@PEAUs66@2@PEAUs67@2@PEAUs68@2@PEAUs69@2@PEAUs70@2@PEAUs71@2@PEAUs72@2@PEAUs73@2@PEAUs74@2@PEAUs75@2@PEAUs76@2@PEAUs77@2@PEAUs78@2@PEAUs79@2@PEAUs80@2@PEAUs81@2@PEAUs82@2@PEAUs83@2@PEAUs84@2@PEAUs85@2@PEAUs86@2@PEAUs87@2@PEAUs88@2@PEAUs89@2@PEAUs90@2@PEAUs91@2@PEAUs92@2@PEAUs93@2@PEAUs94@2@PEAUs95@2@PEAUs96@2@PEAUs97@2@PEAUs98@2@PEAUs99@2@@Z";
 
-MangleResult many_type_subs[] = {
+MangleResult many_type_subs[kTestTargetCount] = {
     {many_type_subs_itanium, "The expanded prototype is very long."},
     {many_type_subs_itanium, "No really, too large to put here."},
     {many_type_subs_itanium, "wc -l says 4394 characters."},
     {many_type_subs_itanium, "Feel free to run c++filt if you want to..."},
+    {many_type_subs_itanium, "longity long long"},
+    {many_type_subs_itanium, "It's been a long, long, long..."},
     {many_type_subs_win32, "Not gonna do it."},
     {many_type_subs_win64, "Wouldn't be prudent."}};
 
@@ -711,7 +717,9 @@ const char *many_name_subs_win64 = "\001?test_function@@YAHPEAUs@test_namespace0
 
 const char *many_name_subs_proto = "test_function(test_namespace0::s*, test_namespace1::s*, test_namespace2::s*, test_namespace3::s*, test_namespace4::s*, test_namespace5::s*, test_namespace6::s*, test_namespace7::s*, test_namespace8::s*, test_namespace9::s*, test_namespace10::s*, test_namespace11::s*, test_namespace12::s*, test_namespace13::s*, test_namespace14::s*, test_namespace15::s*, test_namespace16::s*, test_namespace17::s*, test_namespace18::s*, test_namespace19::s*, test_namespace20::s*, test_namespace21::s*, test_namespace22::s*, test_namespace23::s*, test_namespace24::s*, test_namespace0::s*, test_namespace1::s*, test_namespace2::s*, test_namespace3::s*, test_namespace4::s*, test_namespace5::s*, test_namespace6::s*, test_namespace7::s*, test_namespace8::s*, test_namespace9::s*, test_namespace10::s*, test_namespace11::s*, test_namespace12::s*, test_namespace13::s*, test_namespace14::s*, test_namespace15::s*, test_namespace16::s*, test_namespace17::s*, test_namespace18::s*, test_namespace19::s*, test_namespace20::s*, test_namespace21::s*, test_namespace22::s*, test_namespace23::s*, test_namespace24::s*)";
 
-MangleResult many_name_subs[] = {
+MangleResult many_name_subs[kTestTargetCount] = {
+    {many_name_subs_itanium, many_name_subs_proto},
+    {many_name_subs_itanium, many_name_subs_proto},
     {many_name_subs_itanium, many_name_subs_proto},
     {many_name_subs_itanium, many_name_subs_proto},
     {many_name_subs_itanium, many_name_subs_proto},
@@ -719,7 +727,9 @@ MangleResult many_name_subs[] = {
     {many_name_subs_win32, many_name_subs_proto},
     {many_name_subs_win64, many_name_subs_proto}};
 
-MangleResult stacked_indirections[] = {
+MangleResult stacked_indirections[kTestTargetCount] = {
+    {"_Z13test_functionPKiPKS0_PKS2_PKS4_PKS6_PKS8_PKSA_PKSC_", ""},
+    {"_Z13test_functionPKiPKS0_PKS2_PKS4_PKS6_PKS8_PKSA_PKSC_", ""},
     {"_Z13test_functionPKiPKS0_PKS2_PKS4_PKS6_PKS8_PKSA_PKSC_", ""},
     {"_Z13test_functionPKiPKS0_PKS2_PKS4_PKS6_PKS8_PKSA_PKSC_", ""},
     {"_Z13test_functionPKiPKS0_PKS2_PKS4_PKS6_PKS8_PKSA_PKSC_", ""},
@@ -921,14 +931,21 @@ void main_tests(const MangleResult *expecteds, const Target &target) {
 }  // namespace
 
 void cplusplus_mangle_test() {
-    Target targets[]{Target(Target::Linux, Target::X86, 32),
-                     Target(Target::Linux, Target::X86, 64),
-                     Target(Target::OSX, Target::X86, 32),
-                     Target(Target::OSX, Target::X86, 64),
-                     Target(Target::Windows, Target::X86, 32),
-                     Target(Target::Windows, Target::X86, 64)};
-    MangleResult *expecteds[]{ItaniumABIMangling_main, ItaniumABIMangling_main, ItaniumABIMangling_main,
-                              ItaniumABIMangling_main, win32_expecteds, win64_expecteds};
+    Target targets[kTestTargetCount]{
+        Target(Target::Linux, Target::X86, 32),
+        Target(Target::Linux, Target::X86, 64),
+        Target(Target::OSX, Target::X86, 32),
+        Target(Target::OSX, Target::X86, 64),
+        Target(Target::IOS, Target::ARM, 32),
+        Target(Target::IOS, Target::ARM, 64),
+        Target(Target::Windows, Target::X86, 32),
+        Target(Target::Windows, Target::X86, 64)};
+    MangleResult *expecteds[kTestTargetCount]{
+        ItaniumABIMangling_main, ItaniumABIMangling_main,
+        ItaniumABIMangling_main, ItaniumABIMangling_main,
+        ItaniumABIMangling_main, ItaniumABIMangling_main,
+        win32_expecteds, win64_expecteds};
+
     size_t i = 0;
     for (const auto &target : targets) {
         main_tests(expecteds[i++], target);
@@ -937,17 +954,17 @@ void cplusplus_mangle_test() {
     {
         // Test all primitive types.
         std::vector<ExternFuncArgument> args;
-        args.push_back(ExternFuncArgument(make_zero(Bool())));
-        args.push_back(ExternFuncArgument(make_zero(Int(8))));
-        args.push_back(ExternFuncArgument(make_zero(UInt(8))));
-        args.push_back(ExternFuncArgument(make_zero(Int(16))));
-        args.push_back(ExternFuncArgument(make_zero(UInt(16))));
-        args.push_back(ExternFuncArgument(make_zero(Int(32))));
-        args.push_back(ExternFuncArgument(make_zero(UInt(32))));
-        args.push_back(ExternFuncArgument(make_zero(Int(64))));
-        args.push_back(ExternFuncArgument(make_zero(UInt(64))));
-        args.push_back(ExternFuncArgument(make_zero(Float(32))));
-        args.push_back(ExternFuncArgument(make_zero(Float(64))));
+        args.emplace_back(make_zero(Bool()));
+        args.emplace_back(make_zero(Int(8)));
+        args.emplace_back(make_zero(UInt(8)));
+        args.emplace_back(make_zero(Int(16)));
+        args.emplace_back(make_zero(UInt(16)));
+        args.emplace_back(make_zero(Int(32)));
+        args.emplace_back(make_zero(UInt(32)));
+        args.emplace_back(make_zero(Int(64)));
+        args.emplace_back(make_zero(UInt(64)));
+        args.emplace_back(make_zero(Float(32)));
+        args.emplace_back(make_zero(Float(64)));
 
         size_t expecteds_index = 0;
         for (const auto &target : targets) {
@@ -972,7 +989,7 @@ void cplusplus_mangle_test() {
             type_info.push_back(t);
         }
         for (int i = 0; i < 200; i++) {
-            args.push_back(make_zero(Handle(1, &type_info[i % 100])));
+            args.emplace_back(make_zero(Handle(1, &type_info[i % 100])));
         }
 
         size_t expecteds_index = 0;
@@ -998,7 +1015,7 @@ void cplusplus_mangle_test() {
             type_info.push_back(t);
         }
         for (int i = 0; i < 50; i++) {
-            args.push_back(make_zero(Handle(1, &type_info[i % 25])));
+            args.emplace_back(make_zero(Handle(1, &type_info[i % 25])));
         }
 
         size_t expecteds_index = 0;
@@ -1024,7 +1041,7 @@ void cplusplus_mangle_test() {
             type_info.push_back(t);
         }
         for (const auto &ti : type_info) {
-            args.push_back(ExternFuncArgument(make_zero(Handle(1, &ti))));
+            args.emplace_back(make_zero(Handle(1, &ti)));
         }
         size_t expecteds_index = 0;
         for (const auto &target : targets) {
@@ -1045,9 +1062,9 @@ void cplusplus_mangle_test() {
                 halide_handle_cplusplus_type t3(halide_handle_cplusplus_type(
                     halide_cplusplus_type_name(halide_cplusplus_type_name::Struct, "s"), {}, {}, {mods}, halide_handle_cplusplus_type::RValueReference));
                 std::vector<ExternFuncArgument> args;
-                args.push_back(make_zero(Handle(1, &t1)));
-                args.push_back(make_zero(Handle(1, &t2)));
-                args.push_back(make_zero(Handle(1, &t3)));
+                args.emplace_back(make_zero(Handle(1, &t1)));
+                args.emplace_back(make_zero(Handle(1, &t2)));
+                args.emplace_back(make_zero(Handle(1, &t3)));
 
                 MangleResult *expecteds = (target.os == Target::Windows) ? (target.bits == 64 ? all_mods_win64 : all_mods_win32) : all_mods_itanium;
                 check_result(expecteds, expecteds_index, target,
@@ -1062,8 +1079,8 @@ void cplusplus_mangle_test() {
         for (const auto &target : targets) {
             size_t expecteds_index = 0;
             std::vector<ExternFuncArgument> args;
-            args.push_back(make_zero(Handle(1, nullptr)));
-            args.push_back(make_zero(Handle(1, nullptr)));
+            args.emplace_back(make_zero(Handle(1, nullptr)));
+            args.emplace_back(make_zero(Handle(1, nullptr)));
 
             MangleResult *expecteds = (target.os == Target::Windows) ? (target.bits == 64 ? two_void_stars_win64 : two_void_stars_win32) : two_void_stars_itanium;
             check_result(expecteds, expecteds_index, target,

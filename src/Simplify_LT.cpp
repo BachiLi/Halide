@@ -30,6 +30,7 @@ Expr Simplify::visit(const LT *op, ExprInfo *bounds) {
 
         auto rewrite = IRMatcher::rewriter(IRMatcher::lt(a, b), op->type, ty);
 
+        // clang-format off
         if (EVAL_IN_LAMBDA
             (rewrite(c0 < c1, fold(c0 < c1)) ||
              rewrite(x < x, false) ||
@@ -41,6 +42,12 @@ Expr Simplify::visit(const LT *op, ExprInfo *bounds) {
              rewrite(x < min(x, y), false) ||
              rewrite(x < min(y, x), false) ||
 
+             // From the simplifier synthesis project
+             rewrite((max(y, z) < min(x, y)), false) ||
+             rewrite((max(y, z) < min(y, x)), false) ||
+             rewrite((max(z, y) < min(x, y)), false) ||
+             rewrite((max(z, y) < min(y, x)), false) ||
+
              // Comparisons of ramps and broadcasts. If the first
              // and last lanes are provably < or >= the broadcast
              // we can collapse the comparison.
@@ -51,7 +58,9 @@ Expr Simplify::visit(const LT *op, ExprInfo *bounds) {
                rewrite(broadcast(z) < ramp(x, c1), false, can_prove(z >= x + fold(max(0, c1 * (lanes - 1))), this)))))) {
             return rewrite.result;
         }
+        // clang-format on
 
+        // clang-format off
         if (rewrite(broadcast(x) < broadcast(y), broadcast(x < y, lanes)) ||
             (no_overflow(ty) && EVAL_IN_LAMBDA
              (rewrite(ramp(x, y) < ramp(z, y), broadcast(x < z, lanes)) ||
@@ -192,6 +201,38 @@ Expr Simplify::visit(const LT *op, ExprInfo *bounds) {
               rewrite(max(y, c0) < c1, fold(c0 < c1) && y < c1) ||
               rewrite(c1 < min(y, c0), fold(c1 < c0) && c1 < y) ||
               rewrite(c1 < max(y, c0), fold(c1 < c0) || c1 < y) ||
+
+              // Cases where we can remove a min on one side because
+              // one term dominates another. These rules were
+              // synthesized then extended by hand.
+              rewrite(min(z, y) < min(x, y), z < min(x, y)) ||
+              rewrite(min(z, y) < min(y, x), z < min(y, x)) ||
+              rewrite(min(z, y) < min(x, y + c0), min(z, y) < x, c0 > 0) ||
+              rewrite(min(z, y) < min(y + c0, x), min(z, y) < x, c0 > 0) ||
+              rewrite(min(z, y + c0) < min(x, y), min(z, y + c0) < x, c0 < 0) ||
+              rewrite(min(z, y + c0) < min(y, x), min(z, y + c0) < x, c0 < 0) ||
+
+              rewrite(min(y, z) < min(x, y), z < min(x, y)) ||
+              rewrite(min(y, z) < min(y, x), z < min(y, x)) ||
+              rewrite(min(y, z) < min(x, y + c0), min(z, y) < x, c0 > 0) ||
+              rewrite(min(y, z) < min(y + c0, x), min(z, y) < x, c0 > 0) ||
+              rewrite(min(y + c0, z) < min(x, y), min(z, y + c0) < x, c0 < 0) ||
+              rewrite(min(y + c0, z) < min(y, x), min(z, y + c0) < x, c0 < 0) ||
+
+              // Equivalents with max
+              rewrite(max(z, y) < max(x, y), max(z, y) < x) ||
+              rewrite(max(z, y) < max(y, x), max(z, y) < x) ||
+              rewrite(max(z, y) < max(x, y + c0), max(z, y) < x, c0 < 0) ||
+              rewrite(max(z, y) < max(y + c0, x), max(z, y) < x, c0 < 0) ||
+              rewrite(max(z, y + c0) < max(x, y), max(z, y + c0) < x, c0 > 0) ||
+              rewrite(max(z, y + c0) < max(y, x), max(z, y + c0) < x, c0 > 0) ||
+
+              rewrite(max(y, z) < max(x, y), max(z, y) < x) ||
+              rewrite(max(y, z) < max(y, x), max(z, y) < x) ||
+              rewrite(max(y, z) < max(x, y + c0), max(z, y) < x, c0 < 0) ||
+              rewrite(max(y, z) < max(y + c0, x), max(z, y) < x, c0 < 0) ||
+              rewrite(max(y + c0, z) < max(x, y), max(z, y + c0) < x, c0 > 0) ||
+              rewrite(max(y + c0, z) < max(y, x), max(z, y + c0) < x, c0 > 0) ||
 
               // Comparisons with selects:
               // x < select(c, t, f) == c && (x < t) || !c && (x < f)
@@ -341,9 +382,9 @@ Expr Simplify::visit(const LT *op, ExprInfo *bounds) {
 
               // Comparison of two mins/maxes that don't cancel when subtracted
               rewrite(min(x, c0) < min(x, c1), false, c0 >= c1) ||
-              rewrite(min(x, c0) < min(x, c1) + c2, false, c0 >= c1 + c2) ||
+              rewrite(min(x, c0) < min(x, c1) + c2, false, c0 >= c1 + c2 && c2 <= 0) ||
               rewrite(max(x, c0) < max(x, c1), false, c0 >= c1) ||
-              rewrite(max(x, c0) < max(x, c1) + c2, false, c0 >= c1 + c2) ||
+              rewrite(max(x, c0) < max(x, c1) + c2, false, c0 >= c1 + c2 && c2 <= 0) ||
 
               // Comparison of aligned ramps can simplify to a comparison of the base
               rewrite(ramp(x * c3 + c2, c1) < broadcast(z * c0),
@@ -357,8 +398,9 @@ Expr Simplify::visit(const LT *op, ExprInfo *bounds) {
                       c0 > 0 && (c3 % c0 == 0) &&
                       c1 * (lanes - 1) < c0 &&
                       c1 * (lanes - 1) >= 0)))) {
-            return mutate(std::move(rewrite.result), bounds);
+            return mutate(rewrite.result, bounds);
         }
+        // clang-format on
     }
 
     if (a.same_as(op->a) && b.same_as(op->b)) {

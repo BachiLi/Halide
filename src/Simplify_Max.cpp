@@ -25,9 +25,21 @@ Expr Simplify::visit(const Max *op, ExprInfo *bounds) {
 
     // Early out when the bounds tells us one side or the other is smaller
     if (a_bounds.max_defined && b_bounds.min_defined && a_bounds.max <= b_bounds.min) {
+        if (const Call *call = b.as<Call>()) {
+            if (call->is_intrinsic(Call::likely) ||
+                call->is_intrinsic(Call::likely_if_innermost)) {
+                return call->args[0];
+            }
+        }
         return b;
     }
     if (b_bounds.max_defined && a_bounds.min_defined && b_bounds.max <= a_bounds.min) {
+        if (const Call *call = a.as<Call>()) {
+            if (call->is_intrinsic(Call::likely) ||
+                call->is_intrinsic(Call::likely_if_innermost)) {
+                return call->args[0];
+            }
+        }
         return a;
     }
 
@@ -42,11 +54,10 @@ Expr Simplify::visit(const Max *op, ExprInfo *bounds) {
         int lanes = op->type.lanes();
         auto rewrite = IRMatcher::rewriter(IRMatcher::max(a, b), op->type);
 
+        // clang-format off
         if (EVAL_IN_LAMBDA
             (rewrite(max(x, x), x) ||
              rewrite(max(c0, c1), fold(max(c0, c1))) ||
-             rewrite(max(IRMatcher::Indeterminate(), x), a) ||
-             rewrite(max(x, IRMatcher::Indeterminate()), b) ||
              rewrite(max(IRMatcher::Overflow(), x), a) ||
              rewrite(max(x,IRMatcher::Overflow()), b) ||
              // Cases where one side dominates:
@@ -70,10 +81,10 @@ Expr Simplify::visit(const Max *op, ExprInfo *bounds) {
              rewrite(max(min(y, x), x), b) ||
              rewrite(max(min(x, c0), c1), b, c1 >= c0) ||
 
-             rewrite(max(intrin(Call::likely, x), x), a) ||
-             rewrite(max(x, intrin(Call::likely, x)), b) ||
-             rewrite(max(intrin(Call::likely_if_innermost, x), x), a) ||
-             rewrite(max(x, intrin(Call::likely_if_innermost, x)), b) ||
+             rewrite(max(intrin(Call::likely, x), x), b) ||
+             rewrite(max(x, intrin(Call::likely, x)), a) ||
+             rewrite(max(intrin(Call::likely_if_innermost, x), x), b) ||
+             rewrite(max(x, intrin(Call::likely_if_innermost, x)), a) ||
 
              (no_overflow(op->type) &&
               (rewrite(max(ramp(x, y), broadcast(z)), a, can_prove(x + y * (lanes - 1) >= z && x >= z, this)) ||
@@ -94,7 +105,9 @@ Expr Simplify::visit(const Max *op, ExprInfo *bounds) {
                rewrite(max(x, ((x + c0)/c1)*c1), a, c1 > 0 && c0 <= 0))))) {
             return rewrite.result;
         }
+        // clang-format on
 
+        // clang-format off
         if (EVAL_IN_LAMBDA
             (rewrite(max(max(x, c0), c1), max(x, fold(max(c0, c1)))) ||
              rewrite(max(max(x, c0), y), max(max(x, y), c0)) ||
@@ -204,8 +217,9 @@ Expr Simplify::visit(const Max *op, ExprInfo *bounds) {
 
                rewrite(max(c0 - x, c1), c0 - min(x, fold(c0 - c1))))))) {
 
-            return mutate(std::move(rewrite.result), bounds);
+            return mutate(rewrite.result, bounds);
         }
+        // clang-format on
     }
 
     const Shuffle *shuffle_a = a.as<Shuffle>();

@@ -18,7 +18,7 @@ set(RUNTIME_CPP
   android_host_cpu_count
   android_io
   arm_cpu_features
-  buffer_t
+  halide_buffer_t
   cache
   can_use_target
   cuda
@@ -47,13 +47,11 @@ set(RUNTIME_CPP
   metal
   metal_objc_arm
   metal_objc_x86
-  mingw_math
   mips_cpu_features
   module_aot_ref_count
   module_jit_ref_count
   msan
   msan_stubs
-  old_buffer_t
   opencl
   opengl
   openglcompute
@@ -176,7 +174,8 @@ function(add_runtime_modules TARGET_RUNTIME_FILES TARGET_RUNTIME_DIR)
       add_custom_command(OUTPUT "${LL_D}"
                          # COMMENT "${SOURCE} -> ${LL_D}"
                          DEPENDS "${SOURCE}"
-                         COMMAND ${CLANG} ${CXX_WARNING_FLAGS} ${RUNTIME_DEBUG_FLAG} -DDEBUG_RUNTIME ${RUNTIME_CXX_FLAGS} -m${j} -target "${TARGET}" "-I${TARGET_RUNTIME_DIR}" -DCOMPILING_HALIDE_RUNTIME "-DLLVM_VERSION=${LLVM_VERSION}" -DBITS_${j} -emit-llvm -S "${SOURCE}" -o "${LL_D}"
+                         VERBATIM
+                         COMMAND ${CLANG} ${CXX_WARNING_FLAGS} ${RUNTIME_DEBUG_FLAG} -DDEBUG_RUNTIME ${RUNTIME_CXX_FLAGS} -m${j} -target ${TARGET} -I${TARGET_RUNTIME_DIR} -DCOMPILING_HALIDE_RUNTIME -DLLVM_VERSION=${LLVM_VERSION} -DBITS_${j} -emit-llvm -S ${SOURCE} -o ${LL_D}
                          # Make sure that the output of this command also depends
                          # on the header files that ${SOURCE} uses
                          # FIXME: Only works for makefile generator
@@ -185,7 +184,8 @@ function(add_runtime_modules TARGET_RUNTIME_FILES TARGET_RUNTIME_DIR)
       add_custom_command(OUTPUT "${LL}"
                          # COMMENT "${SOURCE} -> ${LL}"
                          DEPENDS "${SOURCE}"
-                         COMMAND ${CLANG} ${CXX_WARNING_FLAGS} ${RUNTIME_CXX_FLAGS} -m${j} -target "${TARGET}" "-I${TARGET_RUNTIME_DIR}" -DCOMPILING_HALIDE_RUNTIME "-DLLVM_VERSION=${LLVM_VERSION}" -DBITS_${j} -emit-llvm -S "${SOURCE}" -o "${LL}"
+                         VERBATIM
+                         COMMAND ${CLANG} ${CXX_WARNING_FLAGS} ${RUNTIME_CXX_FLAGS} -m${j} -target ${TARGET} -I${TARGET_RUNTIME_DIR} -DCOMPILING_HALIDE_RUNTIME -DLLVM_VERSION=${LLVM_VERSION} -DBITS_${j} -emit-llvm -S ${SOURCE} -o ${LL}
                          )
 
       add_custom_command(OUTPUT "${BC_D}"
@@ -202,12 +202,12 @@ function(add_runtime_modules TARGET_RUNTIME_FILES TARGET_RUNTIME_DIR)
       add_custom_command(OUTPUT "${INITMOD_D}"
                          # COMMENT "${BC_D} -> ${INITMOD_D}"
                          DEPENDS "${BC_D}" binary2cpp
-                         COMMAND binary2cpp "halide_internal_initmod_${i}_${j}_debug" < "${BC_D}" > "${INITMOD_D}"
+                         COMMAND $<TARGET_FILE:binary2cpp> "halide_internal_initmod_${i}_${j}_debug" < "${BC_D}" > "${INITMOD_D}"
                          )
       add_custom_command(OUTPUT "${INITMOD}"
                          # COMMENT "${BC} -> ${INITMOD}"
                          DEPENDS "${BC}" binary2cpp
-                         COMMAND binary2cpp "halide_internal_initmod_${i}_${j}" < "${BC}" > "${INITMOD}"
+                         COMMAND $<TARGET_FILE:binary2cpp> "halide_internal_initmod_${i}_${j}" < "${BC}" > "${INITMOD}"
                          )
       list(APPEND INITIAL_MODULES ${INITMOD})
       list(APPEND INITIAL_MODULES ${INITMOD_D})
@@ -232,7 +232,7 @@ foreach (i ${RUNTIME_LL} )
   add_custom_command(OUTPUT "${INITMOD}"
                      # COMMENT "${BC} -> ${INITMOD}"
                      DEPENDS "${BC}" binary2cpp
-                     COMMAND binary2cpp "halide_internal_initmod_${i}_ll" < "${BC}" > "${INITMOD}"
+                     COMMAND $<TARGET_FILE:binary2cpp> "halide_internal_initmod_${i}_ll" < "${BC}" > "${INITMOD}"
                      )
   list(APPEND INITIAL_MODULES "${INITMOD}")
 endforeach()
@@ -241,15 +241,15 @@ foreach (i ${RUNTIME_BC} )
   add_custom_command(OUTPUT "${INITMOD}"
                      # COMMENT "Building initial module ptx_${i}..."
                      DEPENDS binary2cpp
-                     COMMAND binary2cpp "halide_internal_initmod_ptx_${i}_ll" < "${NATIVE_RUNTIME_DIR}nvidia_libdevice_bitcode/libdevice.${i}.10.bc" > "${INITMOD}"
+                     COMMAND $<TARGET_FILE:binary2cpp> "halide_internal_initmod_ptx_${i}_ll" < "${NATIVE_RUNTIME_DIR}nvidia_libdevice_bitcode/libdevice.${i}.10.bc" > "${INITMOD}"
                      VERBATIM)
   list(APPEND INITIAL_MODULES "${INITMOD}")
 endforeach()
 
 add_custom_command(OUTPUT "${INITMOD_PREFIX}inlined_c.cpp"
-  # COMMENT "buffer_t.cpp -> ${INITMOD_PREFIX}inlined_c.cpp"
-  DEPENDS "${NATIVE_RUNTIME_DIR}buffer_t.cpp" binary2cpp
-  COMMAND binary2cpp "halide_internal_initmod_inlined_c" < "${NATIVE_RUNTIME_DIR}buffer_t.cpp" > "${INITMOD_PREFIX}inlined_c.cpp"
+  # COMMENT "halide_buffer_t.cpp -> ${INITMOD_PREFIX}inlined_c.cpp"
+  DEPENDS "${NATIVE_RUNTIME_DIR}halide_buffer_t.cpp" binary2cpp
+  COMMAND $<TARGET_FILE:binary2cpp> "halide_internal_initmod_inlined_c" < "${NATIVE_RUNTIME_DIR}halide_buffer_t.cpp" > "${INITMOD_PREFIX}inlined_c.cpp"
   )
 list(APPEND INITIAL_MODULES "${INITMOD_PREFIX}inlined_c.cpp")
 
@@ -274,7 +274,7 @@ foreach (i ${RUNTIME_HEADER_FILES})
   add_custom_command(OUTPUT "${INITMOD_PREFIX}${SYM_NAME}.cpp"
     # COMMENT "${i} -> ${INITMOD_PREFIX}${SYM_NAME}.cpp"
     DEPENDS "${NATIVE_RUNTIME_DIR}${i}" binary2cpp
-    COMMAND binary2cpp "halide_internal_runtime_header_${SYM_NAME}" < "${NATIVE_RUNTIME_DIR}${i}" > "${INITMOD_PREFIX}${SYM_NAME}.cpp"
+    COMMAND $<TARGET_FILE:binary2cpp> "halide_internal_runtime_header_${SYM_NAME}" < "${NATIVE_RUNTIME_DIR}${i}" > "${INITMOD_PREFIX}${SYM_NAME}.cpp"
     )
   list(APPEND INITIAL_MODULES "${INITMOD_PREFIX}${SYM_NAME}.cpp")
 endforeach()
@@ -442,13 +442,12 @@ set(HEADER_FILES
   VectorizeLoops.h
   WasmExecutor.h
   WrapCalls.h
-  WrapExternStages.h
 )
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include")
 file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/include/" NATIVE_INCLUDE_PATH)
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/include/Halide.h"
-  COMMAND build_halide_h "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt" ${HEADER_FILES} > "${NATIVE_INCLUDE_PATH}Halide.h"
+  COMMAND $<TARGET_FILE:build_halide_h> "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt" ${HEADER_FILES} > "${NATIVE_INCLUDE_PATH}Halide.h"
   WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
   DEPENDS build_halide_h "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt" ${HEADER_FILES})
 add_custom_target(
@@ -628,7 +627,6 @@ add_library(Halide ${HALIDE_LIBRARY_TYPE}
   VectorizeLoops.cpp
   WasmExecutor.cpp
   WrapCalls.cpp
-  WrapExternStages.cpp
   ${HEADER_FILES}
   ${INITIAL_MODULES}
 )
@@ -755,9 +753,9 @@ if (MSVC)
 else()
   if (NOT HALIDE_ENABLE_RTTI)
     if (NOT MSVC)
-      target_compile_options(Halide PUBLIC "-fno-rtti")
+      target_compile_options(Halide PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>)
     else()
-      target_compile_options(Halide PUBLIC "/GR-")
+      target_compile_options(Halide PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/GR- >)
     endif()
   endif()
 endif()
@@ -777,10 +775,9 @@ llvm_config(Halide ${LLVM_USE_SHARED} ${LLVM_COMPONENTS})
 if (NOT MSVC AND NOT LLVM_USE_SHARED_LLVM_LIBRARY)
   set(LLVM_CONFIG ${LLVM_TOOLS_BINARY_DIR}/llvm-config)
   execute_process(COMMAND "${LLVM_CONFIG}" --system-libs ${LLVM_COMPONENTS} OUTPUT_VARIABLE EXTRA_LIBS)
-  string(STRIP EXTRA_LIBS "${EXTRA_LIBS}")
-  string(REPLACE "-l" ";" EXTRA_LIBS "${EXTRA_LIBS}")
+  string(STRIP EXTRA_LIBS "${EXTRA_LIBS}")   # strip whitespace from start & end
   string(REPLACE "\n" "" EXTRA_LIBS "${EXTRA_LIBS}")
-  string(REPLACE " " "" EXTRA_LIBS "${EXTRA_LIBS}")
+  string(REPLACE " " ";" EXTRA_LIBS "${EXTRA_LIBS}")  # convert into a list
   target_link_libraries(Halide PUBLIC ${EXTRA_LIBS})
 endif()
 
