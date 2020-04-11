@@ -6,10 +6,10 @@
 #include <stack>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "Debug.h"
 #include "Error.h"
-#include "Util.h"
 
 /** \file
  * Defines the Scope class, which is used for keeping track of names in a scope while traversing IR
@@ -41,12 +41,11 @@ public:
     }
 
     void push(const T &t) {
-        if (_empty) {
-            _empty = false;
-        } else {
-            _rest.push_back(_top);
+        if (!_empty) {
+            _rest.push_back(std::move(_top));
         }
         _top = t;
+        _empty = false;
     }
 
     T top() const {

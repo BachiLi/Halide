@@ -4,8 +4,8 @@
 #include <type_traits>
 
 #include "Argument.h"
+#include "Function.h"  // for ExternFuncArgument
 #include "IR.h"
-#include "Util.h"
 
 /** \file
  *

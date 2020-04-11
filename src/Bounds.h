@@ -13,6 +13,8 @@
 namespace Halide {
 namespace Internal {
 
+class Function;
+
 typedef std::map<std::pair<std::string, int>, Interval> FuncValueBounds;
 
 /** Given an expression in some variables, and a map from those

@@ -12,8 +12,9 @@
 #include <string>
 
 #include "Argument.h"
+#include "Expr.h"
 #include "ExternalCode.h"
-#include "IR.h"
+#include "Function.h"  // for NameMangling
 #include "ModulusRemainder.h"
 #include "Target.h"
 

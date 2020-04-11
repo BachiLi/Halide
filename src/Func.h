@@ -7,9 +7,7 @@
  */
 
 #include "Argument.h"
-#include "Function.h"
-#include "IR.h"
-#include "IROperator.h"
+#include "Expr.h"
 #include "JITModule.h"
 #include "Module.h"
 #include "Param.h"
@@ -62,6 +60,7 @@ struct VarOrRVar {
 class ImageParam;
 
 namespace Internal {
+class Function;
 struct Split;
 struct StorageDim;
 }  // namespace Internal

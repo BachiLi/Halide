@@ -4,6 +4,10 @@
 /** \file
  * Defines the internal representation of a halide function and related classes
  */
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "Buffer.h"
 #include "Definition.h"
@@ -11,12 +15,7 @@
 #include "FunctionPtr.h"
 #include "IntrusivePtr.h"
 #include "Parameter.h"
-#include "Reduction.h"
 #include "Schedule.h"
-#include "Util.h"
-
-#include <map>
-#include <utility>
 
 namespace Halide {
 
@@ -95,7 +94,6 @@ struct Call;
  * a function. Similar to a front-end Func object, but with no
  * syntactic sugar to help with definitions. */
 class Function {
-
     FunctionPtr contents;
 
 public:
