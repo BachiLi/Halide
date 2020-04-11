@@ -495,8 +495,7 @@ void test_break() {
         ForAll(x, Block::make({
             If(x >= 10, Break::make(x.name)),
             f(x) = x,
-        }),
-        Vectorize(8)
+        })
     )});
     s = ProducerConsumer::make_produce(f.name(), s);
 
