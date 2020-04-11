@@ -259,6 +259,13 @@ Stmt Scope_(TempVar t, Stmt s) {
     return s;
 }
 
+Stmt Scope_(const std::vector<TempVar> &ts, Stmt s) {
+    for (TempVar t : ts) {
+        s = Allocate::make(t.name, Int(32), MemoryType::Register, {}, const_true(), s);
+    }
+    return s;
+}
+
 /////////////////////////////////////////////////////////
 
 /// Store 100 to a scalar function
@@ -486,9 +493,11 @@ void test_break() {
     s = ForAll(x, f(x) = 0);
     s = Block::make({s,
         ForAll(x, Block::make({
-        If(x >= 10, Break::make(x.name)),
-        f(x) = x,
-    }))});
+            If(x >= 10, Break::make(x.name)),
+            f(x) = x,
+        }),
+        Vectorize(8)
+    )});
     s = ProducerConsumer::make_produce(f.name(), s);
 
     JITModule m = compile({}, {out}, {f.param()}, s);
@@ -501,44 +510,76 @@ void test_break() {
     }
 }
 
-// void mandelbrot() {
-//     Buffer<int> out(512, 512, "h");
-//     InOutBuffer f(out);
+void mandelbrot() {
+    Buffer<int> out(512, 512, "h");
+    InOutBuffer f(out);
 
-//     Stmt s;
-//     LoopVar x("x", f.min(0), f.extent(0));
-//     LoopVar y("y", f.min(1), f.extent(1));
-//     LoopVar i("i", 0, 512);
-//     TempVar z_re(Float(32)), z_im(Float(32)), count(Int(32));
-//     s = ForAll({x, y}, Block::make({
-//             z_re = cast<float>(x),
-//             z_im = cast<float>(y),
-//             ForAll(i, Block::make({
-//                 If(z_re * z_re + z_im * z_im > 4.f, Block::make({
-//                     count = i,
-//                     Break::make()
-//                 })), Block::make({
-//                     z_re = cast<float>(x) + z_re * z_re - z_im * z_im,
-//                     z_im = cast<float>(y) + 2 * z_re * z_im
-//                 })
-//             }))
-//         }),
-//         Vectorize(8),
-//         Parallelize(8));
-//     s = ProducerConsumer::make_produce(h.name(), s);    
-// }
+    float x0 = -2;
+    float y0 = -1;
+    float x1 = 1;
+    float y1 = 1;
+    float dx = (x1 - x0) / 512.f;
+    float dy = (y1 - y0) / 512.f;
+
+    Stmt s;
+    LoopVar x("x", f.min(0), f.extent(0));
+    LoopVar y("y", f.min(1), f.extent(1));
+    LoopVar i("i", 0, 512);
+    TempVar z_re(Float(32)), z_im(Float(32)), count(Int(32));
+    s = ForAll({x, y}, Block::make({
+            Scope_({z_re, z_im, count}, Block::make({
+                z_re = x0 + cast<float>(x) * dx,
+                z_im = y0 + cast<float>(y) * dy,
+                count = 512,
+                ForAll(i, Block::make({
+                    If(z_re * z_re + z_im * z_im > 4.f, Block::make({
+                        count = i,
+                        Break::make(i.name)
+                    })),
+                    Block::make({
+                        z_re = cast<float>(x) + z_re * z_re - z_im * z_im,
+                        z_im = cast<float>(y) + 2 * z_re * z_im
+                    })
+                })),
+                f(x, y) = count
+            }))
+        }),
+        Vectorize(1),
+        Parallelize(8));
+    s = ProducerConsumer::make_produce(f.name(), s);
+
+    JITModule m = compile({}, {out}, {f.param()}, s);
+    run(m, {}, {out});
+    for (int y = 0; y < 512; y++) {
+        for (int x = 0; x < 512; x++) {
+            float z_re = x0 + float(x) * dx;
+            float z_im = y0 + float(y) * dy;
+            int count = 512;
+            for (int i = 0; i < 512; i++) {
+                if (z_re * z_re + z_im * z_im > 4.f) {
+                    count = i;
+                    break;
+                }
+                z_re = float(x) + z_re * z_re - z_im * z_im;
+                z_im = float(y) + 2 * z_re * z_im;
+            }
+
+            _halide_user_assert(out(x, y) == count);
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
-    // store_to_scalar();
-    // load_store_scalar();
-    // call_provide_scalar();
-    // provide_loop();
-    // provide_loop_multidim();
-    // call_provide_loop_multidim();
-    // in_place_bubble_sort();
-    // add_vectorize();
-    // add_parallelize_vectorize();
+    store_to_scalar();
+    load_store_scalar();
+    call_provide_scalar();
+    provide_loop();
+    provide_loop_multidim();
+    call_provide_loop_multidim();
+    in_place_bubble_sort();
+    add_vectorize();
+    add_parallelize_vectorize();
     test_break();
-    // mandelbrot();
+    mandelbrot();
     return 0;
 }

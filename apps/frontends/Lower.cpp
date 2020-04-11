@@ -52,13 +52,6 @@ Module lower_from_stmt(Stmt s,
 
     result_module.append(main_func);
 
-    // Append a wrapper for this pipeline that accepts old buffer_ts
-    // and upgrades them. It will use the same name, so it will
-    // require C++ linkage. We don't need it when jitting.
-    if (!t.has_feature(Target::JIT)) {
-        add_legacy_wrapper(result_module, main_func);
-    }
-
     return result_module;
 }
 
