@@ -271,8 +271,7 @@ class PredicateLoadStore : public IRMutator {
             // no less than 4
             // TODO: disabling for now due to trunk LLVM breakage.
             // See: https://github.com/halide/Halide/issues/3534
-            // return (bit_size == 32) && (lanes >= 4);
-            return false;
+            return (bit_size == 32) && (lanes >= 4);
         }
         // For other architecture, do not predicate vector load/store
         return false;
