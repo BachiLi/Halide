@@ -10,7 +10,7 @@ using namespace Halide;
 using namespace Halide::ConciseCasts;
 
 // Shared variables
-Var x, y, c, yi, yo, yii, xi;
+Var x{"x"}, y{"y"}, c{"c"}, xi{"xi"}, xo{"xo"}, xii{"xii"}, yi{"yi"}, yo{"yo"}, yii{"yii"}, tile{"tile"};
 
 // Average two positive values rounding up
 Expr avg(Expr a, Expr b) {
@@ -22,14 +22,14 @@ Expr blur121(Expr a, Expr b, Expr c) {
     return avg(avg(a, c), b);
 }
 
-Func interleave_x(Func a, Func b) {
-    Func out;
+Func interleave_x(std::string name, Func a, Func b) {
+    Func out{name};
     out(x, y) = select((x % 2) == 0, a(x / 2, y), b(x / 2, y));
     return out;
 }
 
-Func interleave_y(Func a, Func b) {
-    Func out;
+Func interleave_y(std::string name, Func a, Func b) {
+    Func out{name};
     out(x, y) = select((y % 2) == 0, a(x, y / 2), b(x, y / 2));
     return out;
 }
@@ -52,7 +52,7 @@ public:
         // gr refers to green sites in the red rows
 
         // Give more convenient names to the four channels we know
-        Func r_r, g_gr, g_gb, b_b;
+        Func r_r{"demosaic_r_r"}, g_gr{"demosaic_g_gr"}, g_gb{"demosaic_g_gb"}, b_b{"demosaic_b_b"};
 
         g_gr(x, y) = deinterleaved(x, y, 0);
         r_r(x, y) = deinterleaved(x, y, 1);
@@ -60,7 +60,8 @@ public:
         g_gb(x, y) = deinterleaved(x, y, 3);
 
         // These are the ones we need to interpolate
-        Func b_r, g_r, b_gr, r_gr, b_gb, r_gb, r_b, g_b;
+        Func b_r{"demosaic_b_r"}, g_r{"demosaic_g_r"}, b_gr{"demosaic_b_gr"}, r_gr{"demosaic_r_gr"},
+             b_gb{"demosaic_b_gb"}, r_gb{"demosaic_r_gb"}, r_b{"demosaic_r_b"}, g_b{"demosaic_g_b"};
 
         // First calculate green at the red and blue sites
 
@@ -130,15 +131,15 @@ public:
         b_r(x, y) = select(bpd_r < bnd_r, bp_r, bn_r);
 
         // Resulting color channels
-        Func r, g, b;
+        Func r{"demosaic_r"}, g{"demosaic_g"}, b{"demosaic_b"};
 
         // Interleave the resulting channels
-        r = interleave_y(interleave_x(r_gr, r_r),
-                         interleave_x(r_b, r_gb));
-        g = interleave_y(interleave_x(g_gr, g_r),
-                         interleave_x(g_b, g_gb));
-        b = interleave_y(interleave_x(b_gr, b_r),
-                         interleave_x(b_b, b_gb));
+        r = interleave_y("interleave_r", interleave_x("interleave_r_g", r_gr, r_r),
+                                         interleave_x("interleave_r_b", r_b, r_gb));
+        g = interleave_y("interleave_g", interleave_x("interleave_g_r", g_gr, g_r),
+                                         interleave_x("interleave_g_b", g_b, g_gb));
+        b = interleave_y("interleave_b", interleave_x("interleave_b_r", b_gr, b_r),
+                                         interleave_x("interleave_b_g", b_b, b_gb));
 
         output(x, y, c) = mux(c, {r(x, y), g(x, y), b(x, y)});
 
@@ -154,7 +155,7 @@ public:
         if (auto_schedule) {
             // blank
         } else if (get_target().has_gpu_feature()) {
-            Var xi, yi;
+            Var xi{"xi"}, yi{"yi"};
             for (Func f : intermediates) {
                 f.compute_at(intermed_compute_at).gpu_threads(x, y);
             }
@@ -240,7 +241,7 @@ Func CameraPipe::hot_pixel_suppression(Func input) {
     Expr a = max(input(x - 2, y), input(x + 2, y),
                  input(x, y - 2), input(x, y + 2));
 
-    Func denoised;
+    Func denoised{"denoised"};
     denoised(x, y) = clamp(input(x, y), 0, a);
 
     return denoised;
@@ -263,7 +264,7 @@ Func CameraPipe::color_correct(Func input) {
     // calibrated matrices using inverse kelvin.
     Expr kelvin = color_temp;
 
-    Func matrix;
+    Func matrix{"color_matrix"};
     Expr alpha = (1.0f / kelvin - 1.0f / 3200) / (1.0f / 7000 - 1.0f / 3200);
     Expr val = (matrix_3200(x, y) * alpha + matrix_7000(x, y) * (1 - alpha));
     matrix(x, y) = cast<int16_t>(val * 256.0f);  // Q8.8 fixed point
@@ -275,7 +276,7 @@ Func CameraPipe::color_correct(Func input) {
         }
     }
 
-    Func corrected;
+    Func corrected{"color_corrected"};
     Expr ir = cast<int32_t>(input(x, y, 0));
     Expr ig = cast<int32_t>(input(x, y, 1));
     Expr ib = cast<int32_t>(input(x, y, 2));
@@ -333,7 +334,7 @@ Func CameraPipe::apply_curve(Func input) {
         // It's a LUT, compute it once ahead of time.
         curve.compute_root();
         if (get_target().has_gpu_feature()) {
-            Var xi;
+            Var xi{"xi"};
             curve.gpu_tile(x, xi, 32);
         }
     }
@@ -346,7 +347,7 @@ Func CameraPipe::apply_curve(Func input) {
         curve.add_trace_tag(cfg.to_trace_tag());
     }
 
-    Func curved;
+    Func curved{"curved"};
 
     if (lutResample == 1) {
         // Use clamp to restrict size of LUT as allocated by compute_root
@@ -407,7 +408,7 @@ void CameraPipe::generate() {
     // to make a 2560x1920 output image, just like the FCam pipe, so
     // shift by 16, 12. We also convert it to be signed, so we can deal
     // with values that fall below 0 during processing.
-    Func shifted;
+    Func shifted{"shifted"};
     shifted(x, y) = cast<int16_t>(input(x + 16, y + 12));
 
     Func denoised = hot_pixel_suppression(shifted);
@@ -453,7 +454,7 @@ void CameraPipe::generate() {
                 .bound(y, 0, (out_height / 2) * 2);
         }
 
-        Var xi, yi, xii, xio;
+        Var xi{"xi"}, yi{"yi"}, xii{"xii"}, xio{"xio"};
 
         /* These tile factors obtain 1391us on a gtx 980. */
         int tile_x = 28;
@@ -470,7 +471,8 @@ void CameraPipe::generate() {
         processed.compute_root()
             .reorder(c, x, y)
             .unroll(x, 2)
-            .gpu_tile(x, y, xi, yi, tile_x, tile_y);
+            .gpu_tile(x, y, xi, yi, tile_x, tile_y)
+            .distribute(y);
 
         curved.compute_at(processed, x)
             .unroll(x, 2)
@@ -505,13 +507,16 @@ void CameraPipe::generate() {
         // stick to 4 threads. On balance, the overhead should
         // not be much for the 2 extra threads that we create
         // on cores that have only two HVX contexts.
-        Expr strip_size;
+        Expr strip_width, strip_height;
         if (get_target().has_feature(Target::HVX)) {
-            strip_size = processed.dim(1).extent() / 4;
+            strip_height = processed.dim(1).extent() / 4;
+            strip_width = processed.dim(0).extent() / 4;
         } else {
-            strip_size = 32;
+            strip_width = 256;
+            strip_height = 32;
         }
-        strip_size = (strip_size / 2) * 2;
+        strip_width = (strip_width / 2) * 2;
+        strip_height = (strip_height / 2) * 2;
 
         int vec = get_target().natural_vector_size(UInt(16));
         if (get_target().has_feature(Target::HVX)) {
@@ -520,15 +525,20 @@ void CameraPipe::generate() {
         processed
             .compute_root()
             .reorder(c, x, y)
+            .split(x, xi, xii, vec)
+            .split(xi, xo, xi, strip_width / 2)
             .split(y, yi, yii, 2, TailStrategy::RoundUp)
-            .split(yi, yo, yi, strip_size / 2)
-            .vectorize(x, 2 * vec, TailStrategy::RoundUp)
+            .split(yi, yo, yi, strip_height / 2)
+            .reorder(c, xii, xi, yii, yi, xo, yo)
+            .vectorize(xii, vec, TailStrategy::RoundUp)
             .unroll(c)
-            .parallel(yo);
+            .fuse(xo, yo, tile)
+            .parallel(tile)
+            .distribute(tile);
 
         denoised
             .compute_at(processed, yi)
-            .store_at(processed, yo)
+            .store_at(processed, yi)
             .prefetch(input, y, 2)
             .fold_storage(y, 16)
             .tile(x, y, x, y, xi, yi, 2 * vec, 2)
@@ -537,7 +547,7 @@ void CameraPipe::generate() {
 
         deinterleaved
             .compute_at(processed, yi)
-            .store_at(processed, yo)
+            .store_at(processed, yi)
             .fold_storage(y, 8)
             .reorder(c, x, y)
             .vectorize(x, 2 * vec, TailStrategy::RoundUp)
@@ -545,7 +555,7 @@ void CameraPipe::generate() {
 
         curved
             .compute_at(processed, yi)
-            .store_at(processed, yo)
+            .store_at(processed, yi)
             .reorder(c, x, y)
             .tile(x, y, x, y, xi, yi, 2 * vec, 2, TailStrategy::RoundUp)
             .vectorize(xi)
@@ -559,7 +569,7 @@ void CameraPipe::generate() {
             .unroll(c);
 
         demosaiced->intermed_compute_at.set({processed, yi});
-        demosaiced->intermed_store_at.set({processed, yo});
+        demosaiced->intermed_store_at.set({processed, yi});
         demosaiced->output_compute_at.set({curved, x});
 
         if (get_target().has_feature(Target::HVX)) {
@@ -572,8 +582,9 @@ void CameraPipe::generate() {
         // We can generate slightly better code if we know the splits divide the extent.
         processed
             .bound(c, 0, 3)
-            .bound(x, 0, ((out_width) / (2 * vec)) * (2 * vec))
-            .bound(y, 0, (out_height / strip_size) * strip_size);
+            // .bound(x, 0, ((out_width) / (2 * vec)) * (2 * vec)) // causes failures with .distribute(tile) above
+            // .bound(y, 0, (out_height / strip_height) * strip_height) // causes failures with .distribute(yo) above
+            ;
 
         /* Optional tags to specify layout for HalideTraceViz */
         {

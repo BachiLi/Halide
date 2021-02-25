@@ -11,6 +11,9 @@ set(CMAKE_CXX_EXTENSIONS NO)
 # Find Halide
 find_package(Halide REQUIRED)
 
+# Find MPI
+find_package(MPI REQUIRED)
+
 # Generator
 add_executable(camera_pipe.generator camera_pipe_generator.cpp)
 target_link_libraries(camera_pipe.generator
@@ -25,7 +28,7 @@ add_halide_library(camera_pipe_auto_schedule FROM camera_pipe.generator
                    AUTOSCHEDULER Halide::Mullapudi2016)
 
 # Main executable
-add_executable(camera_pipe_process process.cpp)
+add_executable(camera_pipe_process process.cpp distributed.cpp distributed.h)
 target_link_libraries(camera_pipe_process
                       PRIVATE
                       Halide::ImageIO

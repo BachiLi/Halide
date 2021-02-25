@@ -8,6 +8,7 @@
 #include "HalideBuffer.h"
 #include "halide_image_io.h"
 #include "halide_malloc_trace.h"
+#include "distributed.h"
 
 #include <cassert>
 #include <cstdint>
@@ -28,10 +29,11 @@ int main(int argc, char **argv) {
     halide_enable_malloc_trace();
 #endif
 
-    fprintf(stderr, "input: %s\n", argv[1]);
+    distributed_init(&argc, &argv);
+
+    fprintf_rank0(stderr, "input: %s\n", argv[1]);
     Buffer<uint16_t> input = load_and_convert_image(argv[1]);
-    fprintf(stderr, "       %d %d\n", input.width(), input.height());
-    Buffer<uint8_t> output(((input.width() - 32) / 32) * 32, ((input.height() - 24) / 32) * 32, 3);
+    fprintf_rank0(stderr, "       %d %d\n", input.width(), input.height());
 
 #ifdef HL_MEMINFO
     info(input, "input");
@@ -64,6 +66,28 @@ int main(int argc, char **argv) {
     int blackLevel = 25;
     int whiteLevel = 1023;
 
+    int full_image_width  = ((input.width () - 32) / 32) * 32;
+    int full_image_height = ((input.height() - 24) / 32) * 32;
+    int full_image_channels = 3;
+    Buffer<uint8_t> output(nullptr, {full_image_width, full_image_height, 3});
+    output.set_distributed({full_image_width, full_image_height, 3});
+    // Query local buffer size
+    camera_pipe(input, matrix_3200, matrix_7000,
+                color_temp, gamma, contrast, sharpen, blackLevel, whiteLevel,
+                output);
+    output.allocate();
+    int local_xmin = output.dim(0).min();
+    int local_xmax = output.dim(0).min()+output.dim(0).extent();
+    int local_ymin = output.dim(1).min();
+    int local_ymax = output.dim(1).min()+output.dim(1).extent();
+    int local_cmin = output.dim(2).min();
+    int local_cmax = output.dim(2).min()+output.dim(2).extent();
+    if(numranks > 1) {
+        fprintf_rank0(stderr, "Running in distributed node with %d processes\n", numranks);
+        fprintf_rank(stderr, "local output shape is [%d,%d,%d]-[%d,%d,%d]\n",
+            local_xmin, local_ymin, local_cmin,
+            local_xmax, local_ymax, local_cmax);
+    }
     double best;
 
     best = benchmark(timing_iterations, 1, [&]() {
@@ -72,7 +96,7 @@ int main(int argc, char **argv) {
                     output);
         output.device_sync();
     });
-    fprintf(stderr, "Halide (manual):\t%gus\n", best * 1e6);
+    fprintf_rank(stderr, "Halide (manual):\t%gus\n", best * 1e6);
 
 #ifndef NO_AUTO_SCHEDULE
     best = benchmark(timing_iterations, 1, [&]() {
@@ -81,13 +105,20 @@ int main(int argc, char **argv) {
                                   output);
         output.device_sync();
     });
-    fprintf(stderr, "Halide (auto):\t%gus\n", best * 1e6);
+    fprintf_rank(stderr, "Halide (auto):\t%gus\n", best * 1e6);
 #endif
 
-    fprintf(stderr, "output: %s\n", argv[7]);
-    convert_and_save_image(output, argv[7]);
-    fprintf(stderr, "        %d %d\n", output.width(), output.height());
 
-    printf("Success!\n");
+    Buffer<uint8_t> *full_output = gather_to_rank0(output, full_image_width, full_image_height);
+    if(full_output != NULL) {
+        // node 0 writes output to file
+        fprintf(stderr, "output: %s\n", argv[7]);
+        convert_and_save_image(*full_output, argv[7]);
+        fprintf(stderr, "        %d %d\n", full_output->width(), full_output->height());
+    }
+
+    distributed_done();
+
+    if(!rank) printf("Success!\n");
     return 0;
 }
