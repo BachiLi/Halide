@@ -799,7 +799,8 @@ void CodeGen_LLVM::compile_buffer(const Buffer<> &buf) {
         ConstantStruct::get(type_t_type, type_fields),                      // type
         ConstantInt::get(i32_t, buf.dimensions()),                          // dimensions
         shape,                                                              // dim
-        global_shape                                                        // distributed_dim
+        ConstantPointerNull::get(i8_t->getPointerTo()),                     // padding
+        global_shape,                                                       // distributed_global_dim
     };
     Constant *buffer_struct = ConstantStruct::get(halide_buffer_t_type, fields);
 

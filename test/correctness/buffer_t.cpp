@@ -22,10 +22,11 @@ int main(int argc, char **argv) {
     CHECK(type, 24, 32);
     CHECK(dimensions, 28, 36);
     CHECK(dim, 32, 40);
-    CHECK(distributed_global_dim, 36, 48);
+    CHECK(padding, 36, 48);
+    CHECK(distributed_global_dim, 40, 56);
 
-    static_assert((sizeof(void *) == 8 && sizeof(halide_buffer_t) == 56) ||
-                      (sizeof(void *) == 4 && sizeof(halide_buffer_t) == 40),
+    static_assert((sizeof(void *) == 8 && sizeof(halide_buffer_t) == 64) ||
+                      (sizeof(void *) == 4 && sizeof(halide_buffer_t) == 44),
                   "size is wrong");
 
     static_assert(sizeof(halide_dimension_t) == 16, "size of halide_dimension_t is wrong");
