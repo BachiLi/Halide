@@ -35,5 +35,8 @@ int main(int argc, char **argv) {
     }
 
     MPI_Finalize();
+    if (rank == 0) {
+        std::cout << "Success!" << std::endl;
+    }
     return 0;
 }

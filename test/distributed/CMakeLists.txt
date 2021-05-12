@@ -1,7 +1,12 @@
-tests(GROUPS correctness_distributed
-      SOURCES
-      distributed.cpp
-      )
+if ("${MPIEXEC_EXECUTABLE}" EQUAL "")
+    tests(GROUPS correctness_distributed
+          SOURCES distributed.cpp)
+else()
+    tests(GROUPS correctness_distributed
+          COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+          COMMAND_SUFFIX ${MPIEXEC_POSTFLAGS}
+          SOURCES distributed.cpp)
+endif()
 
 target_link_libraries(correctness_distributed_distributed PRIVATE MPI::MPI_CXX)
 
@@ -52,7 +57,14 @@ function(halide_define_aot_test NAME)
 
     target_link_libraries("${TARGET}" PRIVATE MPI::MPI_CXX)
 
-    add_halide_test("${TARGET}" GROUPS distributed_generator)
+    if ("${MPIEXEC_EXECUTABLE}" EQUAL "")
+        add_halide_test("${TARGET}" GROUPS distributed_generator)
+    else()
+        add_halide_test("${TARGET}"
+                        COMMAND "${MPIEXEC_EXECUTABLE}"
+                        ARGS ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS} "${TARGET}" ${MPIEXEC_POSTFLAGS}
+                        GROUPS distributed_generator)
+    endif()
 endfunction()
 
 halide_define_aot_test(distributed)

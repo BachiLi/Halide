@@ -599,5 +599,8 @@ int main(int argc, char **argv) {
     }
 
     MPI_Finalize();
+    if (rank == 0) {
+        printf("Success!\n");
+    }
     return 0;
 }
