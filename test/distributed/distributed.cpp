@@ -346,19 +346,19 @@ int main(int argc, char **argv) {
         int buf_max = std::min(buf_min + num_elements_per_proc - 1, 20 - 1);
         if (out.dim(0).min() != 0) {
             printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), 0);
-            return 0;
+            return -1;
         }
         if (out.dim(0).max() != 19) {
             printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), 19);
-            return 0;
+            return -1;
         }
         if (out.dim(1).min() != buf_min) {
             printf("rank %d: out.dim(1).min() = %d instead of %d\n", rank, out.dim(1).min(), buf_min);
-            return 0;
+            return -1;
         }
         if (out.dim(1).max() != buf_max) {
             printf("rank %d: out.dim(1).max() = %d instead of %d\n", rank, out.dim(1).max(), buf_max);
-            return 0;
+            return -1;
         }
         for (int y = out.dim(1).min(); y <= out.dim(1).max(); y++) {
             for (int x = out.dim(0).min(); x <= out.dim(0).max(); x++) {
@@ -381,11 +381,11 @@ int main(int argc, char **argv) {
         if (rank == 0) {
             if (out.dim(0).min() != 0) {
                 printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), 0);
-                return 0;
+                return -1;
             }
             if (out.dim(0).max() != 19) {
                 printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), 19);
-                return 0;
+                return -1;
             }
         } else {
             int num_elements_per_proc = (20 + numprocs - 1) / numprocs;
@@ -393,11 +393,11 @@ int main(int argc, char **argv) {
             int buf_max = std::min(buf_min + num_elements_per_proc - 1, 20 - 1);
             if (out.dim(0).min() != buf_min) {
                 printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), buf_min);
-                return 0;
+                return -1;
             }
             if (out.dim(0).max() != buf_max) {
                 printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), buf_max);
-                return 0;
+                return -1;
             }
         }
         for (int x = out.dim(0).min(); x <= out.dim(0).max(); x++) {
@@ -422,11 +422,11 @@ int main(int argc, char **argv) {
         if (rank == 0) {
             if (out.dim(0).min() != 0) {
                 printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), 0);
-                return 0;
+                return -1;
             }
             if (out.dim(0).max() != 19) {
                 printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), 19);
-                return 0;
+                return -1;
             }
         } else {
             int num_elements_per_proc = (20 + numprocs - 1) / numprocs;
@@ -434,11 +434,11 @@ int main(int argc, char **argv) {
             int buf_max = std::min(buf_min + num_elements_per_proc - 1, 20 - 1);
             if (out.dim(0).min() != buf_min) {
                 printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), buf_min);
-                return 0;
+                return -1;
             }
             if (out.dim(0).max() != buf_max) {
                 printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), buf_max);
-                return 0;
+                return -1;
             }
         }
         for (int x = out.dim(0).min(); x <= out.dim(0).max(); x++) {
@@ -466,19 +466,19 @@ int main(int argc, char **argv) {
         }
         if (out.dim(0).min() != 0) {
             printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), 0);
-            return 0;
+            return -1;
         }
         if (out.dim(0).max() != 9) {
             printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), 9);
-            return 0;
+            return -1;
         }
         if (out.dim(1).min() != buf_min) {
             printf("rank %d: out.dim(1).min() = %d instead of %d\n", rank, out.dim(1).min(), buf_min);
-            return 0;
+            return -1;
         }
         if (out.dim(1).max() != buf_max) {
             printf("rank %d: out.dim(1).max() = %d instead of %d\n", rank, out.dim(1).max(), buf_max);
-            return 0;
+            return -1;
         }
         for (int y = out.dim(1).min(); y <= out.dim(1).max(); y++) {
             for (int x = out.dim(0).min(); x <= out.dim(0).max(); x++) {
@@ -507,27 +507,27 @@ int main(int argc, char **argv) {
         }
         if (out.dim(0).min() != 0) {
             printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), 0);
-            return 0;
+            return -1;
         }
         if (out.dim(0).max() != 4) {
             printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), 4);
-            return 0;
+            return -1;
         }
         if (out.dim(1).min() != 0) {
             printf("rank %d: out.dim(1).min() = %d instead of %d\n", rank, out.dim(1).min(), 0);
-            return 0;
+            return -1;
         }
         if (out.dim(1).max() != 6) {
             printf("rank %d: out.dim(1).max() = %d instead of %d\n", rank, out.dim(1).max(), 6);
-            return 0;
+            return -1;
         }
         if (out.dim(2).min() != buf_min) {
             printf("rank %d: out.dim(2).min() = %d instead of %d\n", rank, out.dim(2).min(), buf_min);
-            return 0;
+            return -1;
         }
         if (out.dim(2).max() != buf_max) {
             printf("rank %d: out.dim(2).max() = %d instead of %d\n", rank, out.dim(2).max(), buf_max);
-            return 0;
+            return -1;
         }
         for (int z = out.dim(2).min(); z <= out.dim(2).max(); z++) {
             for (int y = out.dim(1).min(); y <= out.dim(1).max(); y++) {
@@ -562,27 +562,27 @@ int main(int argc, char **argv) {
         }
         if (out.dim(0).min() != 0) {
             printf("rank %d: out.dim(0).min() = %d instead of %d\n", rank, out.dim(0).min(), 0);
-            return 0;
+            return -1;
         }
         if (out.dim(0).max() != 4) {
             printf("rank %d: out.dim(0).max() = %d instead of %d\n", rank, out.dim(0).max(), 4);
-            return 0;
+            return -1;
         }
         if (out.dim(1).min() != 0) {
             printf("rank %d: out.dim(1).min() = %d instead of %d\n", rank, out.dim(1).min(), 0);
-            return 0;
+            return -1;
         }
         if (out.dim(1).max() != 6) {
             printf("rank %d: out.dim(1).max() = %d instead of %d\n", rank, out.dim(1).max(), 6);
-            return 0;
+            return -1;
         }
         if (out.dim(2).min() != buf_min) {
             printf("rank %d: out.dim(2).min() = %d instead of %d\n", rank, out.dim(2).min(), buf_min);
-            return 0;
+            return -1;
         }
         if (out.dim(2).max() != buf_max) {
             printf("rank %d: out.dim(2).max() = %d instead of %d\n", rank, out.dim(2).max(), buf_max);
-            return 0;
+            return -1;
         }
         for (int z = out.dim(2).min(); z <= out.dim(2).max(); z++) {
             for (int y = out.dim(1).min(); y <= out.dim(1).max(); y++) {
